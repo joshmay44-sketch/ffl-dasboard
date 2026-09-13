@@ -23,7 +23,7 @@
   const HIST_CACHE_PREFIX = "ffl_hist_week_";
   const RECENT_WEEKS_BACK = 3;
   const START_SIT_MARGIN = 2; // points of edge before flagging a bench upgrade
-  const INJURY_FLAGS = ["Questionable", "Doubtful", "Out", "IR"];
+  const INJURY_FLAGS = ["Questionable", "Doubtful", "Out", "IR", "Suspended", "Sus", "PUP"];
 
   const DATA = {
     league: null,
