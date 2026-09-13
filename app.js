@@ -1,0 +1,669 @@
+(() => {
+  "use strict";
+
+  const LEAGUE_ID = "1328109892581462016";
+  const BASE = "https://api.sleeper.app/v1";
+  const REFRESH_MS = 60000;
+  const PLAYERS_CACHE_KEY = "ffl_players_cache_v1";
+  const PLAYERS_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12h — Sleeper asks not to hammer /players/nfl
+  const MY_USER_KEY = "ffl_my_user_id";
+
+  const INJURY_CODES = {
+    Questionable: "Q",
+    Doubtful: "D",
+    Out: "O",
+    IR: "IR",
+    PUP: "PUP",
+    Suspended: "SUS",
+    Sus: "SUS",
+    NA: "NA",
+    "COVID-19": "Q",
+  };
+
+  const HIST_CACHE_PREFIX = "ffl_hist_week_";
+  const RECENT_WEEKS_BACK = 3;
+  const START_SIT_MARGIN = 2; // points of edge before flagging a bench upgrade
+  const INJURY_FLAGS = ["Questionable", "Doubtful", "Out", "IR"];
+
+  const DATA = {
+    league: null,
+    users: [],
+    rosters: [],
+    matchups: [],
+    players: {},
+    week: 1,
+    myUserId: localStorage.getItem(MY_USER_KEY) || null,
+    trending: [],
+    recentPerf: {},
+  };
+
+  const el = (id) => document.getElementById(id);
+  const escapeHtml = (s) =>
+    String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  async function fetchJSON(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Sleeper API ${res.status} on ${url.replace(BASE, "")}`);
+    return res.json();
+  }
+
+  async function ensurePlayers() {
+    try {
+      const raw = localStorage.getItem(PLAYERS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Date.now() - parsed.ts < PLAYERS_MAX_AGE_MS && parsed.data) {
+          DATA.players = parsed.data;
+          return;
+        }
+      }
+    } catch (e) { /* corrupt cache, refetch */ }
+
+    const full = await fetchJSON(`${BASE}/players/nfl`);
+    const trimmed = {};
+    for (const id in full) {
+      const p = full[id];
+      if (!p) continue;
+      trimmed[id] = {
+        n: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || id,
+        p: p.position || (p.fantasy_positions && p.fantasy_positions[0]) || "",
+        t: p.team || "FA",
+        i: p.injury_status || null,
+      };
+    }
+    DATA.players = trimmed;
+    try {
+      localStorage.setItem(PLAYERS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: trimmed }));
+    } catch (e) { /* storage quota — fine, stays in memory for this session */ }
+  }
+
+  function histCacheKey(week) {
+    return `${HIST_CACHE_PREFIX}${LEAGUE_ID}_${week}`;
+  }
+
+  // Completed weeks never change, so they're cached indefinitely once fetched;
+  // only the current (in-progress) week is fetched fresh every cycle.
+  async function getWeekMatchups(week, cacheable) {
+    if (cacheable) {
+      try {
+        const raw = localStorage.getItem(histCacheKey(week));
+        if (raw) return JSON.parse(raw);
+      } catch (e) { /* corrupt cache, refetch */ }
+    }
+    const data = await fetchJSON(`${BASE}/league/${LEAGUE_ID}/matchups/${week}`);
+    if (cacheable) {
+      try { localStorage.setItem(histCacheKey(week), JSON.stringify(data)); } catch (e) { /* quota — fine */ }
+    }
+    return data;
+  }
+
+  // Average fantasy points per player over the last few completed weeks, for this roster.
+  async function computeRecentPerformance(rosterId, currentWeek) {
+    const perPlayer = {};
+    for (let w = currentWeek - 1; w >= Math.max(1, currentWeek - RECENT_WEEKS_BACK); w--) {
+      try {
+        const wk = await getWeekMatchups(w, true);
+        const mine = wk.find((m) => m.roster_id === rosterId);
+        if (mine && mine.players_points) {
+          for (const pid in mine.players_points) {
+            const pts = mine.players_points[pid];
+            if (pts === null || pts === undefined) continue;
+            if (!perPlayer[pid]) perPlayer[pid] = { sum: 0, n: 0 };
+            perPlayer[pid].sum += pts;
+            perPlayer[pid].n += 1;
+          }
+        }
+      } catch (e) { /* week not available — skip it */ }
+    }
+    return perPlayer;
+  }
+  function avgPts(perPlayerMap, pid) {
+    const e = perPlayerMap[pid];
+    if (!e || !e.n) return null;
+    return e.sum / e.n;
+  }
+
+  function flexEligibility(slotLabel) {
+    const s = (slotLabel || "").toUpperCase();
+    if (s.includes("SUPER_FLEX") || s === "SUPERFLEX") return ["QB", "RB", "WR", "TE"];
+    if (s.includes("FLEX")) return ["RB", "WR", "TE"];
+    if (s === "QB" || s === "RB" || s === "WR" || s === "TE" || s === "K" || s === "DEF") return [s];
+    return s ? [s] : [];
+  }
+
+  function userFor(userId) {
+    return DATA.users.find((u) => u.user_id === userId) || null;
+  }
+  function teamNameFor(userId) {
+    const u = userFor(userId);
+    if (!u) return "Unknown Team";
+    return (u.metadata && u.metadata.team_name) || u.display_name || "Unnamed Team";
+  }
+  function avatarUrl(avatarId) {
+    return avatarId ? `https://sleepercdn.com/avatars/thumbs/${avatarId}` : "";
+  }
+  function rosterForUser(userId) {
+    return DATA.rosters.find((r) => r.owner_id === userId || (r.co_owners || []).includes(userId)) || null;
+  }
+  function matchupFor(rosterId) {
+    return DATA.matchups.find((m) => m.roster_id === rosterId) || null;
+  }
+  function ptsFor(matchup, playerId, idx) {
+    if (!matchup) return null;
+    if (matchup.players_points && playerId in matchup.players_points) return matchup.players_points[playerId];
+    if (matchup.starters_points && typeof idx === "number") return matchup.starters_points[idx];
+    return null;
+  }
+  function fmtPts(n) {
+    return n === null || n === undefined ? "-" : Number(n).toFixed(1);
+  }
+  function injuryBadge(status) {
+    if (!status) return "";
+    const code = INJURY_CODES[status] || status.slice(0, 3).toUpperCase();
+    return `<span class="badge badge-${code}">${code}</span>`;
+  }
+
+  function playerCardHtml(playerId, slotLabel, matchup, idx) {
+    if (!playerId || playerId === "0") {
+      return `<div class="player-card">
+        <div class="player-slot">${escapeHtml(slotLabel || "")}</div>
+        <div class="player-info"><div class="player-name" style="color:var(--text-dim)">Empty</div></div>
+      </div>`;
+    }
+    const p = DATA.players[playerId] || { n: playerId, p: "", t: "", i: null };
+    const pts = ptsFor(matchup, playerId, idx);
+    const img =
+      p.p === "DEF"
+        ? ""
+        : `<img class="player-avatar" alt="" loading="lazy" src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg" onerror="this.style.visibility='hidden'" />`;
+    return `<div class="player-card">
+      <div class="player-slot">${escapeHtml(slotLabel || p.p || "")}</div>
+      ${img || `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>`}
+      <div class="player-info">
+        <div class="player-name-row">
+          <span class="player-name">${escapeHtml(p.n)}</span>
+          ${injuryBadge(p.i)}
+        </div>
+        <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+      </div>
+      <div class="player-points">${fmtPts(pts)}</div>
+    </div>`;
+  }
+
+  function renderTopbar() {
+    const lg = DATA.league;
+    if (!lg) return;
+    el("league-name").textContent = lg.name || "League";
+    el("league-sub").textContent = `Week ${DATA.week} · ${lg.season || ""}`;
+    const avEl = el("league-avatar");
+    const url = avatarUrl(lg.avatar);
+    if (url) {
+      avEl.src = url;
+      avEl.hidden = false;
+    } else {
+      avEl.hidden = true;
+    }
+  }
+
+  function renderMatchups() {
+    const groups = new Map();
+    for (const m of DATA.matchups) {
+      const key = m.matchup_id ?? `solo-${m.roster_id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(m);
+    }
+    const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    const entries = [...groups.values()];
+    entries.sort((a, b) => {
+      const aMine = myRoster && a.some((m) => m.roster_id === myRoster.roster_id) ? 0 : 1;
+      const bMine = myRoster && b.some((m) => m.roster_id === myRoster.roster_id) ? 0 : 1;
+      return aMine - bMine;
+    });
+
+    if (!entries.length) {
+      el("matchups-list").innerHTML = `<div class="empty-state">No matchups found for week ${DATA.week} yet.</div>`;
+      return;
+    }
+
+    el("matchups-list").innerHTML = entries
+      .map((group) => {
+        if (group.length < 2) {
+          const m = group[0];
+          const roster = DATA.rosters.find((r) => r.roster_id === m.roster_id);
+          const name = roster ? teamNameFor(roster.owner_id) : "Team";
+          return `<div class="matchup-card"><div class="matchup-bye">${escapeHtml(name)} — Bye this week</div></div>`;
+        }
+        const [a, b] = group;
+        const rows = [a, b].map((m) => {
+          const roster = DATA.rosters.find((r) => r.roster_id === m.roster_id);
+          const isMe = myRoster && roster && roster.roster_id === myRoster.roster_id;
+          const user = roster ? userFor(roster.owner_id) : null;
+          const name = roster ? teamNameFor(roster.owner_id) : "Team";
+          const other = group.find((x) => x !== m);
+          const winning = (m.points || 0) > (other.points || 0) && (m.points || 0) > 0;
+          const av = user ? avatarUrl(user.avatar) : "";
+          return `<div class="matchup-row">
+            ${av ? `<img class="matchup-avatar" alt="" src="${av}" />` : `<div class="matchup-avatar"></div>`}
+            <div class="matchup-team">
+              <div class="matchup-team-name">${escapeHtml(name)}${isMe ? " (You)" : ""}</div>
+              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}</div>
+            </div>
+            <div class="matchup-score${winning ? " winning" : ""}">${(m.points || 0).toFixed(2)}</div>
+          </div>`;
+        });
+        return `<div class="matchup-card">${rows[0]}<div class="matchup-divider"></div>${rows[1]}</div>`;
+      })
+      .join("");
+  }
+
+  function renderStandings() {
+    const sorted = [...DATA.rosters].sort((a, b) => {
+      const aw = a.settings.wins || 0, bw = b.settings.wins || 0;
+      if (bw !== aw) return bw - aw;
+      const apf = (a.settings.fpts || 0) + (a.settings.fpts_decimal || 0) / 100;
+      const bpf = (b.settings.fpts || 0) + (b.settings.fpts_decimal || 0) / 100;
+      return bpf - apf;
+    });
+    const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+
+    el("standings-body").innerHTML = sorted
+      .map((r, i) => {
+        const user = userFor(r.owner_id);
+        const name = teamNameFor(r.owner_id);
+        const isMe = myRoster && r.roster_id === myRoster.roster_id;
+        const av = user ? avatarUrl(user.avatar) : "";
+        const pf = ((r.settings.fpts || 0) + (r.settings.fpts_decimal || 0) / 100).toFixed(2);
+        const pa = ((r.settings.fpts_against || 0) + (r.settings.fpts_against_decimal || 0) / 100).toFixed(2);
+        return `<tr>
+          <td class="rank-col">${i + 1}</td>
+          <td><div class="standings-team">
+            ${av ? `<img class="standings-avatar" alt="" src="${av}" />` : `<div class="standings-avatar"></div>`}
+            <span class="standings-name${isMe ? " me" : ""}">${escapeHtml(name)}</span>
+          </div></td>
+          <td>${r.settings.wins || 0}-${r.settings.losses || 0}${r.settings.ties ? "-" + r.settings.ties : ""}</td>
+          <td>${pf}</td>
+          <td>${pa}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  function renderMyTeam() {
+    const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!roster) {
+      el("myteam-header").innerHTML = "";
+      el("starters-list").innerHTML = "";
+      el("bench-list").innerHTML = "";
+      el("ir-wrap").hidden = true;
+      el("myteam-header").innerHTML = `<div class="empty-state" style="width:100%">
+        Pick your team from the settings (⚙) button up top to see your roster.
+      </div>`;
+      return;
+    }
+    const user = userFor(roster.owner_id);
+    const name = teamNameFor(roster.owner_id);
+    const av = user ? avatarUrl(user.avatar) : "";
+    el("myteam-header").innerHTML = `
+      ${av ? `<img alt="" src="${av}" />` : ""}
+      <div>
+        <div class="myteam-title">${escapeHtml(name)}</div>
+        <div class="myteam-record">${roster.settings.wins || 0}-${roster.settings.losses || 0}${roster.settings.ties ? "-" + roster.settings.ties : ""}</div>
+      </div>`;
+
+    const matchup = matchupFor(roster.roster_id);
+    const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
+    const starters = roster.starters || [];
+    el("starters-list").innerHTML =
+      starters.map((pid, idx) => playerCardHtml(pid, slotOrder[idx] || "", matchup, idx)).join("") ||
+      `<div class="empty-state">No starters set.</div>`;
+
+    const reserveSet = new Set([...(roster.reserve || []), ...(roster.taxi || [])]);
+    const starterSet = new Set(starters);
+    const bench = (roster.players || []).filter((pid) => !starterSet.has(pid) && !reserveSet.has(pid));
+    el("bench-list").innerHTML =
+      bench.map((pid) => playerCardHtml(pid, "BN", matchup)).join("") || `<div class="empty-state">No bench players.</div>`;
+
+    if (reserveSet.size) {
+      el("ir-wrap").hidden = false;
+      el("ir-list").innerHTML = [...reserveSet].map((pid) => playerCardHtml(pid, "IR", matchup)).join("");
+    } else {
+      el("ir-wrap").hidden = true;
+    }
+  }
+
+  function renderInjuryBanner() {
+    const banner = el("injury-banner");
+    const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!roster) {
+      banner.hidden = true;
+      return;
+    }
+    const flagged = (roster.starters || [])
+      .filter((pid) => pid && pid !== "0")
+      .map((pid) => DATA.players[pid])
+      .filter((p) => p && INJURY_FLAGS.includes(p.i));
+
+    if (!flagged.length) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.innerHTML =
+      `<span class="injury-banner-label">⚠ ${flagged.length} starter${flagged.length > 1 ? "s" : ""} flagged</span>` +
+      flagged.map((p) => `<button class="injury-chip">${escapeHtml(p.n)} ${injuryBadge(p.i)}</button>`).join("");
+    banner.querySelectorAll(".injury-chip").forEach((btn) => {
+      btn.addEventListener("click", () => document.querySelector('.tab-btn[data-view="myteam"]').click());
+    });
+  }
+
+  function renderStartSit() {
+    const wrap = el("startsit-list");
+    const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!roster) {
+      wrap.innerHTML = "";
+      return;
+    }
+    const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
+    const starters = roster.starters || [];
+    const reserveSet = new Set([...(roster.reserve || []), ...(roster.taxi || [])]);
+    const starterSet = new Set(starters);
+    const bench = (roster.players || []).filter((pid) => !starterSet.has(pid) && !reserveSet.has(pid));
+    const perf = DATA.recentPerf || {};
+    const suggestions = [];
+    const usedBench = new Set();
+
+    // Build one slot descriptor per starter up front so injury-driven swaps (more
+    // urgent) can claim the best bench candidate before performance-driven ones do —
+    // a single bench player should never be suggested into two starter slots at once.
+    const slots = starters
+      .map((pid, idx) => ({ pid, idx, slot: slotOrder[idx] || "", info: DATA.players[pid] }))
+      .filter((s) => s.pid && s.pid !== "0" && s.info);
+
+    function bestCandidate(pool) {
+      let best = null;
+      let bestAvg = -Infinity;
+      pool.forEach((bpid) => {
+        const a = avgPts(perf, bpid);
+        if (a !== null && a > bestAvg) {
+          bestAvg = a;
+          best = bpid;
+        }
+      });
+      return best === null ? { best: null, bestAvg: null } : { best, bestAvg };
+    }
+
+    const passes = [
+      slots.filter((s) => INJURY_FLAGS.includes(s.info.i)),
+      slots.filter((s) => !INJURY_FLAGS.includes(s.info.i)),
+    ];
+
+    passes[0].forEach((s) => {
+      const eligible = flexEligibility(s.slot);
+      if (!eligible.length) return;
+      const candidates = bench.filter((bpid) => {
+        const bp = DATA.players[bpid];
+        return bp && eligible.includes(bp.p) && !usedBench.has(bpid);
+      });
+      if (!candidates.length) return;
+      const healthy = candidates.filter((bpid) => !INJURY_FLAGS.includes((DATA.players[bpid] || {}).i));
+      const pool = healthy.length ? healthy : candidates;
+      const { best, bestAvg } = bestCandidate(pool);
+      const chosen = best !== null ? best : pool[0];
+      const chosenAvg = best !== null ? bestAvg : avgPts(perf, pool[0]);
+      usedBench.add(chosen);
+      suggestions.push({ starterPid: s.pid, starterAvg: avgPts(perf, s.pid), benchPid: chosen, benchAvg: chosenAvg, reason: "injury", slot: s.slot });
+    });
+
+    passes[1].forEach((s) => {
+      const eligible = flexEligibility(s.slot);
+      if (!eligible.length) return;
+      const starterAvg = avgPts(perf, s.pid);
+      if (starterAvg === null) return;
+      const candidates = bench.filter((bpid) => {
+        const bp = DATA.players[bpid];
+        return bp && eligible.includes(bp.p) && !usedBench.has(bpid);
+      });
+      if (!candidates.length) return;
+      const { best, bestAvg } = bestCandidate(candidates);
+      if (best !== null && bestAvg - starterAvg >= START_SIT_MARGIN) {
+        usedBench.add(best);
+        suggestions.push({ starterPid: s.pid, starterAvg, benchPid: best, benchAvg: bestAvg, reason: "performance", slot: s.slot });
+      }
+    });
+
+    if (!suggestions.length) {
+      wrap.innerHTML = `<div class="empty-state">No changes suggested — your lineup looks solid based on recent scoring and health.</div>`;
+      return;
+    }
+
+    wrap.innerHTML = suggestions
+      .map((s) => {
+        const sp = DATA.players[s.starterPid] || { n: s.starterPid };
+        const bp = DATA.players[s.benchPid] || { n: s.benchPid };
+        let reasonText;
+        if (s.reason === "injury") {
+          const code = INJURY_CODES[sp.i] || sp.i;
+          reasonText =
+            s.benchAvg !== null
+              ? `${sp.n} is ${code} — ${bp.n} has averaged ${fmtPts(s.benchAvg)} pts recently`
+              : `${sp.n} is ${code} — ${bp.n} may be the safer play`;
+        } else {
+          reasonText = `${bp.n} has outscored ${sp.n} recently (${fmtPts(s.benchAvg)} vs ${fmtPts(s.starterAvg)} avg)`;
+        }
+        return `<div class="suggestion-card">
+          <div class="suggestion-slot">${escapeHtml(s.slot)}</div>
+          <div class="suggestion-body">
+            <div class="suggestion-swap"><span class="sit">${escapeHtml(sp.n)}</span><span class="arrow">→</span><span class="start">${escapeHtml(bp.n)}</span></div>
+            <div class="suggestion-reason">${escapeHtml(reasonText)}</div>
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function computeThinPositions(roster) {
+    const counts = {};
+    (roster.players || []).forEach((pid) => {
+      const p = DATA.players[pid];
+      if (p && p.p) counts[p.p] = (counts[p.p] || 0) + 1;
+    });
+    const required = {};
+    (DATA.league.roster_positions || []).forEach((s) => {
+      if (s === "BN" || s === "IR" || s === "TAXI") return;
+      const elig = flexEligibility(s);
+      if (elig.length === 1) required[elig[0]] = (required[elig[0]] || 0) + 1;
+    });
+    return Object.keys(required).filter((pos) => (counts[pos] || 0) <= required[pos]);
+  }
+
+  function renderWaiver() {
+    const wrap = el("waiver-list");
+    const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!roster) {
+      wrap.innerHTML = "";
+      return;
+    }
+    if (!DATA.trending.length) {
+      wrap.innerHTML = `<div class="empty-state">No trending waiver data available right now.</div>`;
+      return;
+    }
+
+    const takenIds = new Set();
+    DATA.rosters.forEach((r) => (r.players || []).forEach((pid) => takenIds.add(pid)));
+    const thinPositions = computeThinPositions(roster);
+    const totalSlots = (DATA.league.roster_positions || []).filter((s) => s !== "IR" && s !== "TAXI").length;
+    const rosterFull = (roster.players || []).length >= totalSlots;
+
+    const available = DATA.trending
+      .filter((t) => !takenIds.has(t.player_id))
+      .map((t) => ({ ...t, info: DATA.players[t.player_id] }))
+      .filter((t) => t.info);
+
+    const relevant = available.filter((t) => thinPositions.includes(t.info.p));
+    const shown = (relevant.length ? relevant : available).slice(0, 8);
+
+    if (!shown.length) {
+      wrap.innerHTML = `<div class="empty-state">No trending waiver targets available right now.</div>`;
+      return;
+    }
+
+    const note = relevant.length
+      ? `Matched to your thin position${thinPositions.length > 1 ? "s" : ""}: ${thinPositions.join(", ")}`
+      : `No trending adds match your thin spots — showing top adds league-wide`;
+
+    wrap.innerHTML =
+      `<div class="waiver-note">${escapeHtml(note)}${rosterFull ? " · your roster is full, this would require a drop" : ""}</div>` +
+      shown
+        .map((t) => {
+          const p = t.info;
+          return `<div class="player-card">
+            <div class="player-slot">${escapeHtml(p.p || "")}</div>
+            <div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>
+            <div class="player-info">
+              <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
+              <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""} · added in ${t.count} leagues today</div>
+            </div>
+          </div>`;
+        })
+        .join("");
+  }
+
+  function renderAll() {
+    renderTopbar();
+    renderMatchups();
+    renderStandings();
+    renderMyTeam();
+    renderInjuryBanner();
+    renderStartSit();
+    renderWaiver();
+  }
+
+  function renderOwnerPicker() {
+    const wrap = el("owner-picker");
+    if (!DATA.users.length) {
+      wrap.innerHTML = `<div class="empty-state">No league members found.</div>`;
+      return;
+    }
+    wrap.innerHTML = DATA.users
+      .map((u) => {
+        const selected = u.user_id === DATA.myUserId;
+        const name = (u.metadata && u.metadata.team_name) || u.display_name;
+        const av = avatarUrl(u.avatar);
+        return `<div class="owner-option${selected ? " selected" : ""}" data-user-id="${escapeHtml(u.user_id)}">
+          ${av ? `<img alt="" src="${av}" />` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--surface)"></div>`}
+          <div>
+            <div class="owner-option-name">${escapeHtml(name)}</div>
+            <div class="owner-option-sub">@${escapeHtml(u.display_name)}</div>
+          </div>
+        </div>`;
+      })
+      .join("");
+    wrap.querySelectorAll(".owner-option").forEach((node) => {
+      node.addEventListener("click", () => {
+        DATA.myUserId = node.getAttribute("data-user-id");
+        localStorage.setItem(MY_USER_KEY, DATA.myUserId);
+        el("settings-modal").close();
+        refreshCycle(); // recompute recent-performance data for the newly selected roster
+      });
+    });
+  }
+
+  function showError(msg) {
+    const b = el("error-banner");
+    b.textContent = msg;
+    b.hidden = false;
+  }
+  function hideError() {
+    el("error-banner").hidden = true;
+  }
+  function setLive(active) {
+    el("refresh-dot").style.opacity = active ? "1" : "0.35";
+  }
+  function updateLastUpdated() {
+    const now = new Date();
+    el("last-updated").textContent = `Updated ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+  }
+
+  let firstLoad = true;
+
+  async function refreshCycle() {
+    setLive(true);
+    try {
+      const [state, league, users, rosters, trending] = await Promise.all([
+        fetchJSON(`${BASE}/state/nfl`),
+        fetchJSON(`${BASE}/league/${LEAGUE_ID}`),
+        fetchJSON(`${BASE}/league/${LEAGUE_ID}/users`),
+        fetchJSON(`${BASE}/league/${LEAGUE_ID}/rosters`),
+        fetchJSON(`${BASE}/players/nfl/trending/add?lookback_hours=24&limit=50`).catch(() => []),
+      ]);
+      const week = Math.max(1, Math.min(18, state.week || league.settings.leg || 1));
+      const matchups = await getWeekMatchups(week, false);
+      await ensurePlayers();
+
+      DATA.league = league;
+      DATA.users = users;
+      DATA.rosters = rosters;
+      DATA.matchups = matchups;
+      DATA.week = week;
+      DATA.trending = trending;
+
+      if (DATA.myUserId) {
+        const myRoster = rosterForUser(DATA.myUserId);
+        DATA.recentPerf = myRoster ? await computeRecentPerformance(myRoster.roster_id, week) : {};
+      } else {
+        DATA.recentPerf = {};
+      }
+
+      renderAll();
+      hideError();
+
+      if (firstLoad) {
+        firstLoad = false;
+        if (!DATA.myUserId || !rosterForUser(DATA.myUserId)) {
+          renderOwnerPicker();
+          el("settings-modal").showModal();
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      showError(`Couldn't refresh data: ${e.message}`);
+    } finally {
+      setLive(false);
+      updateLastUpdated();
+    }
+  }
+
+  function initTabs() {
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const view = btn.getAttribute("data-view");
+        document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== `view-${view}`));
+      });
+    });
+  }
+
+  function initSettings() {
+    el("settings-btn").addEventListener("click", () => {
+      renderOwnerPicker();
+      el("settings-modal").showModal();
+    });
+    el("settings-close").addEventListener("click", () => el("settings-modal").close());
+    el("settings-modal").addEventListener("click", (e) => {
+      if (e.target === el("settings-modal")) el("settings-modal").close();
+    });
+  }
+
+  function init() {
+    initTabs();
+    initSettings();
+    refreshCycle();
+    setInterval(refreshCycle, REFRESH_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshCycle();
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+})();

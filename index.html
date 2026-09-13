@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>Fantasy Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏈</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="league-id">
+        <img id="league-avatar" class="league-avatar" alt="" hidden />
+        <div class="league-text">
+          <div id="league-name" class="league-name">Loading league…</div>
+          <div id="league-sub" class="league-sub">&nbsp;</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="refresh-dot" class="refresh-dot" title="Live"></span>
+        <button id="settings-btn" class="icon-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 0 0 .06-.94 7.14 7.14 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94L2.83 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.32.66.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.24.1.52.02.66-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="last-updated" class="last-updated">Loading…</div>
+    <div id="injury-banner" class="injury-banner" hidden></div>
+    <div id="error-banner" class="error-banner" hidden></div>
+
+    <main>
+      <section id="view-matchups" class="view">
+        <div id="matchups-list" class="stack"></div>
+      </section>
+
+      <section id="view-standings" class="view" hidden>
+        <table class="standings-table">
+          <thead>
+            <tr><th class="rank-col">#</th><th>Team</th><th>W-L-T</th><th>PF</th><th>PA</th></tr>
+          </thead>
+          <tbody id="standings-body"></tbody>
+        </table>
+      </section>
+
+      <section id="view-myteam" class="view" hidden>
+        <div id="myteam-header" class="myteam-header"></div>
+        <h2 class="section-heading">Starters</h2>
+        <div id="starters-list" class="stack"></div>
+
+        <h2 class="section-heading">Start/Sit Suggestions</h2>
+        <p class="section-note">Based on recent scoring (last 3 completed weeks) and injury status — Sleeper's public API doesn't expose opponent matchup difficulty, so that's not factored in.</p>
+        <div id="startsit-list" class="stack"></div>
+
+        <h2 class="section-heading">Bench</h2>
+        <div id="bench-list" class="stack"></div>
+        <div id="ir-wrap" hidden>
+          <h2 class="section-heading">IR / Reserve</h2>
+          <div id="ir-list" class="stack"></div>
+        </div>
+
+        <h2 class="section-heading">Waiver Wire Targets</h2>
+        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league.</p>
+        <div id="waiver-list" class="stack"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <button class="tab-btn active" data-view="matchups">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>
+        <span>Matchups</span>
+      </button>
+      <button class="tab-btn" data-view="standings">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 21V10h4v11H4Zm6 0V3h4v18h-4Zm6 0v-7h4v7h-4Z"/></svg>
+        <span>Standings</span>
+      </button>
+      <button class="tab-btn" data-view="myteam">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.42 0-8 2.24-8 5v2h16v-2c0-2.76-3.58-5-8-5Z"/></svg>
+        <span>My Team</span>
+      </button>
+    </nav>
+  </div>
+
+  <dialog id="settings-modal" class="settings-modal">
+    <div class="modal-header">
+      <h2>Which team is yours?</h2>
+      <button id="settings-close" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <p class="modal-hint">Pick your team once — it's saved on this device.</p>
+    <div id="owner-picker" class="owner-picker"></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
