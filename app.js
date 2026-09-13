@@ -45,7 +45,10 @@
     dvp: {},
     dvpSource: null,
     dvpFailed: false,
+    scoreStdDev: null,
+    scoreStdDevSource: null,
   };
+  const DEFAULT_SCORE_STDDEV = 22; // points — typical weekly fantasy lineup volatility, used only until real season data exists
 
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
@@ -147,6 +150,61 @@
     const e = perPlayerMap[pid];
     if (!e || !e.n) return null;
     return e.sum / e.n;
+  }
+
+  // Real week-to-week volatility of each team's actual scores this season, pooled
+  // across rosters (more stable early in the season than any single team's own
+  // sample). Falls back to a labeled default only when there isn't enough season
+  // data yet to measure it — never silently substitutes a guess for a real number.
+  async function computeScoreStdDev(currentWeek) {
+    const perRoster = {}; // roster_id -> [scores]
+    for (let w = 1; w < currentWeek; w++) {
+      try {
+        const wk = await getWeekMatchups(w, true);
+        wk.forEach((entry) => {
+          if (typeof entry.points !== "number") return;
+          if (!perRoster[entry.roster_id]) perRoster[entry.roster_id] = [];
+          perRoster[entry.roster_id].push(entry.points);
+        });
+      } catch (e) { /* week not available — skip it */ }
+    }
+    const variances = [];
+    Object.values(perRoster).forEach((scores) => {
+      if (scores.length < 2) return;
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+      const variance = scores.reduce((a, b) => a + (b - mean) ** 2, 0) / (scores.length - 1);
+      variances.push(variance);
+    });
+    if (!variances.length) return { stdDev: DEFAULT_SCORE_STDDEV, source: "a typical-volatility default (not enough completed weeks yet to measure your league's actual variance)" };
+    const pooled = variances.reduce((a, b) => a + b, 0) / variances.length;
+    return { stdDev: Math.sqrt(pooled), source: `your league's actual week-to-week scoring variance through week ${currentWeek - 1}` };
+  }
+
+  // Standard normal CDF (Abramowitz & Stegun approximation, ~7.5e-8 max error) —
+  // converts a projected point gap into a win probability. No external library,
+  // no borrowed opinion — just the standard statistical conversion.
+  function normalCDF(z) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(z));
+    const d = 0.3989423 * Math.exp((-z * z) / 2);
+    let prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    if (z > 0) prob = 1 - prob;
+    return prob;
+  }
+
+  function winProbability(projA, projB) {
+    const sigma = DATA.scoreStdDev || DEFAULT_SCORE_STDDEV;
+    const spread = Math.sqrt(2) * sigma; // assumes similar volatility for both teams
+    const z = (projB - projA) / spread;
+    const prob = normalCDF(-z); // P(A's score > B's score)
+    // Never claim certainty — real games have upset potential beyond what score
+    // variance alone captures (injuries mid-game, model error, etc).
+    return Math.min(0.99, Math.max(0.01, prob));
+  }
+
+  function teamProjectedTotal(roster) {
+    return (roster.starters || [])
+      .filter((pid) => pid && pid !== "0")
+      .reduce((sum, pid) => sum + (projectPoints(pid) || 0), 0);
   }
 
   function flexEligibility(slotLabel) {
@@ -430,6 +488,15 @@
   }
 
   function renderMatchups() {
+    const stdDevStatus = el("stddev-status");
+    if (stdDevStatus) {
+      if (DATA.scoreStdDevSource) {
+        stdDevStatus.hidden = false;
+        stdDevStatus.textContent = `Win % is based on ${DATA.scoreStdDevSource}.`;
+      } else {
+        stdDevStatus.hidden = true;
+      }
+    }
     const groups = new Map();
     for (const m of DATA.matchups) {
       const key = m.matchup_id ?? `solo-${m.roster_id}`;
@@ -458,6 +525,12 @@
           return `<div class="matchup-card"><div class="matchup-bye">${escapeHtml(name)} — Bye this week</div></div>`;
         }
         const [a, b] = group;
+        const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
+        const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
+        const projA = rosterA ? teamProjectedTotal(rosterA) : null;
+        const projB = rosterB ? teamProjectedTotal(rosterB) : null;
+        const probA = projA !== null && projB !== null ? winProbability(projA, projB) : null;
+
         const rows = [a, b].map((m) => {
           const roster = DATA.rosters.find((r) => r.roster_id === m.roster_id);
           const isMe = myRoster && roster && roster.roster_id === myRoster.roster_id;
@@ -466,11 +539,12 @@
           const other = group.find((x) => x !== m);
           const winning = (m.points || 0) > (other.points || 0) && (m.points || 0) > 0;
           const av = user ? avatarUrl(user.avatar) : "";
+          const prob = probA === null ? null : m === a ? probA : 1 - probA;
           return `<div class="matchup-row">
             ${av ? `<img class="matchup-avatar" alt="" src="${av}" />` : `<div class="matchup-avatar"></div>`}
             <div class="matchup-team">
               <div class="matchup-team-name">${escapeHtml(name)}${isMe ? " (You)" : ""}</div>
-              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}</div>
+              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}${prob !== null ? ` · ${Math.round(prob * 100)}% to win` : ""}</div>
             </div>
             <div class="matchup-score${winning ? " winning" : ""}">${(m.points || 0).toFixed(2)}</div>
           </div>`;
@@ -517,12 +591,7 @@
     if (!body) return;
     const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
 
-    const scored = DATA.rosters.map((r) => {
-      const total = (r.starters || [])
-        .filter((pid) => pid && pid !== "0")
-        .reduce((sum, pid) => sum + (projectPoints(pid) || 0), 0);
-      return { roster: r, total };
-    });
+    const scored = DATA.rosters.map((r) => ({ roster: r, total: teamProjectedTotal(r) }));
     scored.sort((a, b) => b.total - a.total);
 
     body.innerHTML = scored
@@ -1056,6 +1125,9 @@
 
       await loadMatchupDiff(week, league.season);
       await ensureDVP();
+      const stdDevResult = await computeScoreStdDev(week);
+      DATA.scoreStdDev = stdDevResult.stdDev;
+      DATA.scoreStdDevSource = stdDevResult.source;
 
       renderAll();
       hideError();

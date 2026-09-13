@@ -6,7 +6,14 @@ the browser and auto-refreshes every 60 seconds.
 
 Six tabs, each its own screen (no more everything stacked on one page):
 
-- **Matchups** — current week head-to-head scores
+- **Matchups** — current week head-to-head scores, plus a win % for each side —
+  computed by converting the projected point gap into a probability using the
+  normal distribution and your league's own real week-to-week scoring volatility
+  (falls back to a labeled typical-volatility default only before enough weeks
+  exist to measure it). Capped to 1–99%; it never claims certainty.
+- **Power Rankings** — every team ranked by total projected starter points (same
+  engine as Start/Sit), independent of actual win-loss record — a strength ranking,
+  not the standings.
 - **Standings** — full league standings (record, points for/against)
 - **My Team** — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.)
 - **Start/Sit** — flags a bench player as a likely upgrade over the corresponding
