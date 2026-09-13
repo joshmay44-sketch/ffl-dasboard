@@ -53,7 +53,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v2_";
+  const DVP_CACHE_PREFIX = "ffl_dvp_v3_"; // bumped to force recompute with new diagnostics
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -288,20 +288,28 @@
     const weekResults = await Promise.all(
       weeks.map((w) => Promise.all([fetchWeekStats(season, w), fetchWeekSchedule(season, w)]))
     );
+    let weeksWithData = 0;
+    let statLinesSeen = 0;
+    let statLinesUsable = 0; // had a matching scoring field
+    let observations = 0; // actually attributed into the table (also needs a schedule match)
     for (const [stats, schedule] of weekResults) {
       if (!stats || !schedule) continue;
+      weeksWithData++;
       for (const pid in stats) {
         const p = DATA.players[pid];
         if (!p || !p.t || !DVP_POSITIONS.includes(p.p)) continue;
-        const oppInfo = schedule[p.t];
-        if (!oppInfo) continue;
+        statLinesSeen++;
         const pts = pointsFromStatLine(stats[pid], field);
         if (pts === null) continue;
+        statLinesUsable++;
+        const oppInfo = schedule[p.t];
+        if (!oppInfo) continue;
         const opp = oppInfo.opponent;
         if (!table[opp]) table[opp] = {};
         if (!table[opp][p.p]) table[opp][p.p] = { sum: 0, n: 0 };
         table[opp][p.p].sum += pts;
         table[opp][p.p].n += 1;
+        observations++;
       }
     }
     const avg = {};
@@ -309,7 +317,10 @@
       avg[team] = {};
       for (const pos in table[team]) avg[team][pos] = table[team][pos].sum / table[team][pos].n;
     }
-    return avg;
+    return {
+      avg,
+      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field },
+    };
   }
 
   async function ensureDVP() {
@@ -331,18 +342,20 @@
     } catch (e) { /* corrupt cache, recompute */ }
 
     try {
-      let table, source;
+      let result, source;
       if (usePrevious) {
         const prevSeason = String(Number(season) - 1);
-        table = await computeDVPForRange(prevSeason, Array.from({ length: 18 }, (_, i) => i + 1));
-        source = `${prevSeason} season (no completed ${season} weeks yet)`;
+        result = await computeDVPForRange(prevSeason, Array.from({ length: 18 }, (_, i) => i + 1));
+        source = `${prevSeason} season (no completed ${season} weeks yet) — ${result.diagnostics.weeksWithData}/${result.diagnostics.weeksAttempted} weeks of data, ${result.diagnostics.observations} player-games, field "${result.diagnostics.field}"`;
       } else {
-        table = await computeDVPForRange(season, Array.from({ length: week - 1 }, (_, i) => i + 1));
-        source = `${season}, weeks 1–${week - 1}`;
+        result = await computeDVPForRange(season, Array.from({ length: week - 1 }, (_, i) => i + 1));
+        source = `${season}, weeks 1–${week - 1} — ${result.diagnostics.weeksWithData}/${result.diagnostics.weeksAttempted} weeks of data, ${result.diagnostics.observations} player-games, field "${result.diagnostics.field}"`;
       }
+      const table = result.avg;
       if (!Object.keys(table).length) throw new Error("empty DVP table");
       DATA.dvp = table;
       DATA.dvpSource = source;
+      DATA.dvpDiagnostics = result.diagnostics;
       DATA.dvpFailed = false;
       try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: table, source })); } catch (e) { /* quota — fine */ }
     } catch (e) {
