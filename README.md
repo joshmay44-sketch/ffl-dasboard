@@ -16,11 +16,13 @@ Six tabs, each its own screen (no more everything stacked on one page):
   not the standings.
 - **Standings** — full league standings (record, points for/against)
 - **My Team** — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.)
-- **Start/Sit** — flags a bench player as a likely upgrade over the corresponding
-  starter, using recent scoring (avg of the last 3 completed weeks), injury status,
-  and — where the opponent lookup succeeds — the opponent's win-loss record as a
-  simple difficulty signal. If that lookup fails, it says so and falls back to
-  scoring + health only.
+- **Start/Sit** — flags a bench player as a likely upgrade using each player's own
+  scoring history (this season's games once they exist, otherwise that exact
+  player's own last-season average — not a generic position average, which would
+  blend in every backup who saw the field and understate real starters), blended
+  with a defense-vs-position projection built from real box scores. Only a true
+  rookie with zero track record anywhere falls back to the generic position
+  average, since that's the only signal available for them.
 - **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
   on any roster in your league, prioritized toward your thin positions, plus a
   **Defense & Kicker Streamers** section: every available DEF/K ranked purely by

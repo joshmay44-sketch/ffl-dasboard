@@ -45,6 +45,7 @@
     dvp: {},
     dvpSource: null,
     dvpFailed: false,
+    lastSeasonPerf: {},
     scoreStdDev: null,
     scoreStdDevSource: null,
   };
@@ -53,7 +54,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v3_"; // bumped to force recompute with new diagnostics
+  const DVP_CACHE_PREFIX = "ffl_dvp_v4_"; // bumped: now also caches each player's own last-season average
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -285,6 +286,7 @@
   async function computeDVPForRange(season, weeks) {
     const field = scoringField();
     const table = {}; // opponent team -> position -> { sum, n }
+    const perPlayer = {}; // player_id -> { sum, n } — this specific player's own average that season
     const weekResults = await Promise.all(
       weeks.map((w) => Promise.all([fetchWeekStats(season, w), fetchWeekSchedule(season, w)]))
     );
@@ -302,6 +304,9 @@
         const pts = pointsFromStatLine(stats[pid], field);
         if (pts === null) continue;
         statLinesUsable++;
+        if (!perPlayer[pid]) perPlayer[pid] = { sum: 0, n: 0 };
+        perPlayer[pid].sum += pts;
+        perPlayer[pid].n += 1;
         const oppInfo = schedule[p.t];
         if (!oppInfo) continue;
         const opp = oppInfo.opponent;
@@ -319,6 +324,7 @@
     }
     return {
       avg,
+      perPlayer,
       diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field },
     };
   }
@@ -335,6 +341,7 @@
         if (Date.now() - parsed.ts < DVP_MAX_AGE_MS) {
           DATA.dvp = parsed.data;
           DATA.dvpSource = parsed.source;
+          DATA.lastSeasonPerf = parsed.perPlayer || {};
           DATA.dvpFailed = false;
           return;
         }
@@ -356,26 +363,35 @@
       DATA.dvp = table;
       DATA.dvpSource = source;
       DATA.dvpDiagnostics = result.diagnostics;
+      DATA.lastSeasonPerf = usePrevious ? result.perPlayer : {};
       DATA.dvpFailed = false;
-      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: table, source })); } catch (e) { /* quota — fine */ }
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: table, source, perPlayer: DATA.lastSeasonPerf })); } catch (e) { /* quota — fine */ }
     } catch (e) {
       DATA.dvp = {};
       DATA.dvpSource = null;
+      DATA.lastSeasonPerf = {};
       DATA.dvpFailed = true;
     }
   }
 
-  // Blends a player's own recent scoring with their opponent's defense-vs-position
-  // baseline. A player with no personal history (rookie, new pickup) falls back
-  // entirely to the DVP number, so there's still a real, data-grounded estimate.
+  // Blends a player's own scoring history with their opponent's defense-vs-position
+  // baseline. "Own history" prefers this season's real games; before enough of
+  // those exist, it falls back to this exact player's own average from last
+  // season (a real starter's established level), not a generic position average —
+  // a position-wide DVP number blends in every backup/role player who saw the
+  // field, which understates anyone who's actually a real starter. Only a player
+  // with no track record at all (true rookie, first game ever) falls back to the
+  // pure position average, since that's the only real signal available for them.
   function projectPoints(playerId) {
     const p = DATA.players[playerId];
     if (!p) return null;
     const recentAvg = avgPts(DATA.recentPerf, playerId);
+    const lastSeasonAvg = avgPts(DATA.lastSeasonPerf, playerId);
+    const personalAvg = recentAvg !== null ? recentAvg : lastSeasonAvg;
     const oppInfo = opponentInfoFor(playerId);
     const dvpAvg = oppInfo && DATA.dvp[oppInfo.opponent] ? DATA.dvp[oppInfo.opponent][p.p] : undefined;
-    if (recentAvg !== null && dvpAvg !== undefined) return recentAvg * PROJECTION_BLEND + dvpAvg * (1 - PROJECTION_BLEND);
-    if (recentAvg !== null) return recentAvg;
+    if (personalAvg !== null && dvpAvg !== undefined) return personalAvg * PROJECTION_BLEND + dvpAvg * (1 - PROJECTION_BLEND);
+    if (personalAvg !== null) return personalAvg;
     if (dvpAvg !== undefined) return dvpAvg;
     return null;
   }

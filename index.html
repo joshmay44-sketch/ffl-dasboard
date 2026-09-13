@@ -69,7 +69,7 @@
       </section>
 
       <section id="view-startsit" class="view" hidden>
-        <p class="section-note">Flags a bench player as a likely upgrade using a projection blending recent scoring with a defense-vs-position model built from real box scores (this season once weeks exist, last season's data as an early-season fallback), plus injury status. No expert rankings or opinions involved — degrades gracefully to recent scoring alone if the matchup data is unavailable.</p>
+        <p class="section-note">Flags a bench player as a likely upgrade using a projection blending each player's own scoring history — this season's games once they exist, or that exact player's own last-season average before then — with a defense-vs-position model built from real box scores. Only a player with zero track record anywhere (a true rookie) falls back to a generic position average. No expert rankings or opinions involved.</p>
         <div id="matchup-diff-status" class="waiver-note" hidden></div>
         <div id="startsit-list" class="stack"></div>
       </section>
