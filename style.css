@@ -151,7 +151,6 @@ html, body {
 }
 
 main { flex: 1; padding: 10px 16px 24px; }
-.view { display: block; }
 
 .section-heading {
   font-size: 13px;
