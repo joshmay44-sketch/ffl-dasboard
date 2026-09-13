@@ -119,11 +119,11 @@ html, body {
   background: rgba(216, 119, 43, 0.12);
   border: 1px solid var(--d);
   border-radius: 10px;
-  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
 }
+.injury-banner:not([hidden]) { display: flex; }
 .injury-banner-label {
   font-size: 12px;
   font-weight: 700;
