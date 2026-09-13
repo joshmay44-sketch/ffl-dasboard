@@ -4,20 +4,43 @@ Mobile-friendly dashboard for Sleeper league `1328109892581462016`. Pure static 
 (no build step, no framework) — fetches live from the public Sleeper API directly in
 the browser and auto-refreshes every 60 seconds.
 
-- **Matchups** tab — current week head-to-head scores
-- **Standings** tab — full league standings (record, points for/against)
-- **My Team** tab — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.)
-- **Injury alert banner** — flags any starter who's Questionable/Doubtful/Out/IR, visible on every tab
-- **Start/Sit suggestions** — flags a bench player as a likely upgrade over the
-  corresponding starter, based on recent scoring (avg of the last 3 completed weeks)
-  and injury status. Sleeper's public API doesn't expose opponent/matchup-difficulty
-  data, so that's *not* a factor here — the section says so.
-- **Waiver wire targets** — Sleeper's trending adds (last 24h), filtered to players
-  not already on any roster in your league, prioritized toward your thin positions.
-  Informational only — Sleeper's public API is read-only, so there's no in-app "add"
-  button; you'd make the actual waiver claim in the Sleeper app.
-- First launch asks you to pick which team is yours from the league member list;
-  it's saved on your device (`localStorage`), no login needed.
+Six tabs, each its own screen (no more everything stacked on one page):
+
+- **Matchups** — current week head-to-head scores
+- **Standings** — full league standings (record, points for/against)
+- **My Team** — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.)
+- **Start/Sit** — flags a bench player as a likely upgrade over the corresponding
+  starter, using recent scoring (avg of the last 3 completed weeks), injury status,
+  and — where the opponent lookup succeeds — the opponent's win-loss record as a
+  simple difficulty signal. If that lookup fails, it says so and falls back to
+  scoring + health only.
+- **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
+  on any roster in your league, prioritized toward your thin positions. Informational
+  only — Sleeper's API is read-only, so there's no in-app "add" button.
+- **Trade Check** — pick players on each side of a proposed trade and compare total
+  market value, pulled from **FantasyCalc** (a community trade-value tool keyed
+  directly off Sleeper player IDs) — a genuinely different data source than Sleeper.
+
+An injury alert banner (Q/D/O/IR starters) shows above the tabs on every screen.
+First launch asks you to pick which team is yours from the league member list;
+saved on your device (`localStorage`), no login needed.
+
+## Serverless functions (`/api`)
+
+Two small Vercel serverless functions back the non-Sleeper data. Both run
+server-side (avoids CORS, keeps any future API key out of client code) and degrade
+gracefully — the frontend shows "unavailable" for that one section rather than
+breaking if either fails:
+
+- **`/api/trade-values`** — proxies FantasyCalc's public values endpoint. Documented
+  enough to be reasonably reliable.
+- **`/api/matchup-difficulty`** — proxies ESPN's *undocumented* public scoreboard
+  endpoint for each team's weekly opponent + that opponent's record. This is the
+  one integration built against an API with no official contract — it's wrapped
+  defensively, but if ESPN changes its response shape, this is the function to
+  check first. It does **not** provide true defense-vs-position strength; that
+  data isn't freely available anywhere reliable that a static/serverless app can
+  reach without a paid subscription.
 
 ## Deploy to your Vercel account
 

@@ -26,6 +26,15 @@
       </div>
     </header>
 
+    <nav class="tabstrip" id="tabstrip">
+      <button class="tab-chip active" data-view="matchups">Matchups</button>
+      <button class="tab-chip" data-view="standings">Standings</button>
+      <button class="tab-chip" data-view="myteam">My Team</button>
+      <button class="tab-chip" data-view="startsit">Start/Sit</button>
+      <button class="tab-chip" data-view="waiver">Waivers</button>
+      <button class="tab-chip" data-view="trade">Trade Check</button>
+    </nav>
+
     <div id="last-updated" class="last-updated">Loading…</div>
     <div id="injury-banner" class="injury-banner" hidden></div>
     <div id="error-banner" class="error-banner" hidden></div>
@@ -48,38 +57,45 @@
         <div id="myteam-header" class="myteam-header"></div>
         <h2 class="section-heading">Starters</h2>
         <div id="starters-list" class="stack"></div>
-
-        <h2 class="section-heading">Start/Sit Suggestions</h2>
-        <p class="section-note">Based on recent scoring (last 3 completed weeks) and injury status — Sleeper's public API doesn't expose opponent matchup difficulty, so that's not factored in.</p>
-        <div id="startsit-list" class="stack"></div>
-
         <h2 class="section-heading">Bench</h2>
         <div id="bench-list" class="stack"></div>
         <div id="ir-wrap" hidden>
           <h2 class="section-heading">IR / Reserve</h2>
           <div id="ir-list" class="stack"></div>
         </div>
+      </section>
 
-        <h2 class="section-heading">Waiver Wire Targets</h2>
-        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league.</p>
+      <section id="view-startsit" class="view" hidden>
+        <p class="section-note">Flags a bench player as a likely upgrade using recent scoring (last 3 completed weeks), injury status, and — where available — opponent strength for the week. When the opponent-strength lookup fails, suggestions fall back to scoring + health only.</p>
+        <div id="matchup-diff-status" class="waiver-note" hidden></div>
+        <div id="startsit-list" class="stack"></div>
+      </section>
+
+      <section id="view-waiver" class="view" hidden>
+        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league and prioritized toward your thin positions. Informational only — Sleeper's API is read-only, so make the actual claim in the Sleeper app.</p>
         <div id="waiver-list" class="stack"></div>
       </section>
-    </main>
 
-    <nav class="tabbar">
-      <button class="tab-btn active" data-view="matchups">
-        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/></svg>
-        <span>Matchups</span>
-      </button>
-      <button class="tab-btn" data-view="standings">
-        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 21V10h4v11H4Zm6 0V3h4v18h-4Zm6 0v-7h4v7h-4Z"/></svg>
-        <span>Standings</span>
-      </button>
-      <button class="tab-btn" data-view="myteam">
-        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.42 0-8 2.24-8 5v2h16v-2c0-2.76-3.58-5-8-5Z"/></svg>
-        <span>My Team</span>
-      </button>
-    </nav>
+      <section id="view-trade" class="view" hidden>
+        <p class="section-note">Player trade values from FantasyCalc, a community market-value tool that keys directly off Sleeper player IDs. Pick players on each side to compare total value.</p>
+        <div id="trade-status" class="waiver-note" hidden></div>
+        <div class="trade-columns">
+          <div class="trade-side">
+            <div class="trade-side-label">You give</div>
+            <div id="trade-give-list" class="stack"></div>
+            <button class="trade-add-btn" id="trade-add-give">+ Add player</button>
+            <div class="trade-total" id="trade-give-total">Total: —</div>
+          </div>
+          <div class="trade-side">
+            <div class="trade-side-label">You get</div>
+            <div id="trade-get-list" class="stack"></div>
+            <button class="trade-add-btn" id="trade-add-get">+ Add player</button>
+            <div class="trade-total" id="trade-get-total">Total: —</div>
+          </div>
+        </div>
+        <div id="trade-verdict" class="trade-verdict" hidden></div>
+      </section>
+    </main>
   </div>
 
   <dialog id="settings-modal" class="settings-modal">
@@ -89,6 +105,15 @@
     </div>
     <p class="modal-hint">Pick your team once — it's saved on this device.</p>
     <div id="owner-picker" class="owner-picker"></div>
+  </dialog>
+
+  <dialog id="player-picker-modal" class="settings-modal">
+    <div class="modal-header">
+      <h2>Add a player</h2>
+      <button id="player-picker-close" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <input type="text" id="player-picker-search" class="player-search" placeholder="Search players…" />
+    <div id="player-picker-list" class="owner-picker"></div>
   </dialog>
 
   <script src="app.js"></script>

@@ -35,7 +35,18 @@
     myUserId: localStorage.getItem(MY_USER_KEY) || null,
     trending: [],
     recentPerf: {},
+    matchupDiff: {},
+    matchupDiffFailed: false,
+    tradeValues: {},
+    tradeValuesLoaded: false,
+    tradeValuesFailed: false,
+    trade: { give: [], get: [] },
+    tradePickerTarget: null,
   };
+
+  const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
+  const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
+  const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
   const el = (id) => document.getElementById(id);
   const escapeHtml = (s) =>
@@ -129,6 +140,83 @@
     if (s.includes("FLEX")) return ["RB", "WR", "TE"];
     if (s === "QB" || s === "RB" || s === "WR" || s === "TE" || s === "K" || s === "DEF") return [s];
     return s ? [s] : [];
+  }
+
+  // Best-effort opponent-strength lookup (see api/matchup-difficulty.js for caveats).
+  // Cached per week since it doesn't change once the week's schedule is set.
+  async function loadMatchupDiff(week, season) {
+    const cacheKey = `${MATCHUP_DIFF_CACHE_PREFIX}${season}_${week}`;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (raw) {
+        DATA.matchupDiff = JSON.parse(raw);
+        DATA.matchupDiffFailed = false;
+        return;
+      }
+    } catch (e) { /* corrupt cache, refetch */ }
+    try {
+      const res = await fetch(`/api/matchup-difficulty?week=${week}&season=${season}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const json = await res.json();
+      DATA.matchupDiff = json.teams || {};
+      DATA.matchupDiffFailed = false;
+      try { localStorage.setItem(cacheKey, JSON.stringify(DATA.matchupDiff)); } catch (e) { /* quota — fine */ }
+    } catch (e) {
+      DATA.matchupDiff = {};
+      DATA.matchupDiffFailed = true;
+    }
+  }
+
+  function opponentInfoFor(playerId) {
+    const p = DATA.players[playerId];
+    if (!p || !p.t || !DATA.matchupDiff[p.t]) return null;
+    return DATA.matchupDiff[p.t];
+  }
+
+  function leagueTradeParams() {
+    const rec = (DATA.league && DATA.league.scoring_settings && DATA.league.scoring_settings.rec) || 0;
+    const ppr = rec >= 1 ? "1" : rec >= 0.5 ? "0.5" : "0";
+    const numTeams = String(DATA.rosters.length || 12);
+    const slots = (DATA.league && DATA.league.roster_positions) || [];
+    const numQbs = slots.includes("SUPER_FLEX") ? "2" : "1";
+    const isDynasty = DATA.league && DATA.league.settings && DATA.league.settings.type === 2 ? "true" : "false";
+    return { ppr, numTeams, numQbs, isDynasty };
+  }
+
+  async function loadTradeValues() {
+    const statusEl = el("trade-status");
+    try {
+      const raw = localStorage.getItem(TRADE_VALUES_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Date.now() - parsed.ts < TRADE_VALUES_MAX_AGE_MS && parsed.data) {
+          DATA.tradeValues = parsed.data;
+          DATA.tradeValuesLoaded = true;
+          renderTradeCheck();
+          return;
+        }
+      }
+    } catch (e) { /* corrupt cache, refetch */ }
+
+    statusEl.hidden = false;
+    statusEl.textContent = "Loading trade values…";
+    try {
+      const { ppr, numTeams, numQbs, isDynasty } = leagueTradeParams();
+      const res = await fetch(`/api/trade-values?ppr=${ppr}&numTeams=${numTeams}&numQbs=${numQbs}&isDynasty=${isDynasty}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const json = await res.json();
+      DATA.tradeValues = json.values || {};
+      DATA.tradeValuesLoaded = true;
+      DATA.tradeValuesFailed = false;
+      try { localStorage.setItem(TRADE_VALUES_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: DATA.tradeValues })); } catch (e) { /* quota — fine */ }
+      statusEl.hidden = true;
+    } catch (e) {
+      DATA.tradeValuesFailed = true;
+      DATA.tradeValuesLoaded = true;
+      statusEl.hidden = false;
+      statusEl.textContent = "Trade values are unavailable right now (FantasyCalc lookup failed). Try again later.";
+    }
+    renderTradeCheck();
   }
 
   function userFor(userId) {
@@ -352,12 +440,19 @@
       `<span class="injury-banner-label">⚠ ${flagged.length} starter${flagged.length > 1 ? "s" : ""} flagged</span>` +
       flagged.map((p) => `<button class="injury-chip">${escapeHtml(p.n)} ${injuryBadge(p.i)}</button>`).join("");
     banner.querySelectorAll(".injury-chip").forEach((btn) => {
-      btn.addEventListener("click", () => document.querySelector('.tab-btn[data-view="myteam"]').click());
+      btn.addEventListener("click", () => document.querySelector('.tab-chip[data-view="myteam"]').click());
     });
   }
 
   function renderStartSit() {
     const wrap = el("startsit-list");
+    const statusEl = el("matchup-diff-status");
+    if (DATA.matchupDiffFailed) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Opponent-strength lookup is unavailable right now — suggestions below use scoring + health only.";
+    } else {
+      statusEl.hidden = true;
+    }
     const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
     if (!roster) {
       wrap.innerHTML = "";
@@ -450,11 +545,18 @@
         } else {
           reasonText = `${bp.n} has outscored ${sp.n} recently (${fmtPts(s.benchAvg)} vs ${fmtPts(s.starterAvg)} avg)`;
         }
+        const spOpp = opponentInfoFor(s.starterPid);
+        const bpOpp = opponentInfoFor(s.benchPid);
+        const oppLine = [
+          spOpp ? `${sp.n} vs ${spOpp.opponent}${spOpp.opponentRecord ? ` (${spOpp.opponentRecord})` : ""}` : null,
+          bpOpp ? `${bp.n} vs ${bpOpp.opponent}${bpOpp.opponentRecord ? ` (${bpOpp.opponentRecord})` : ""}` : null,
+        ].filter(Boolean).join(" · ");
         return `<div class="suggestion-card">
           <div class="suggestion-slot">${escapeHtml(s.slot)}</div>
           <div class="suggestion-body">
             <div class="suggestion-swap"><span class="sit">${escapeHtml(sp.n)}</span><span class="arrow">→</span><span class="start">${escapeHtml(bp.n)}</span></div>
             <div class="suggestion-reason">${escapeHtml(reasonText)}</div>
+            ${oppLine ? `<div class="suggestion-reason">${escapeHtml(oppLine)}</div>` : ""}
           </div>
         </div>`;
       })
@@ -526,6 +628,125 @@
           </div>`;
         })
         .join("");
+  }
+
+  function tradePlayerRowHtml(playerId, side) {
+    const p = DATA.players[playerId] || { n: playerId, p: "", t: "" };
+    const v = DATA.tradeValues[playerId];
+    const img =
+      p.p === "DEF"
+        ? ""
+        : `<img class="player-avatar" alt="" loading="lazy" src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg" onerror="this.style.visibility='hidden'" />`;
+    return `<div class="player-card" data-trade-side="${side}" data-player-id="${escapeHtml(playerId)}">
+      ${img || `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>`}
+      <div class="player-info">
+        <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span></div>
+        <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+      </div>
+      <div class="player-points">${v ? v.value : "—"}</div>
+      <button class="trade-remove-btn" data-remove-side="${side}" data-remove-id="${escapeHtml(playerId)}" aria-label="Remove">✕</button>
+    </div>`;
+  }
+
+  function tradeSideTotal(side) {
+    return DATA.trade[side].reduce((sum, pid) => sum + ((DATA.tradeValues[pid] && DATA.tradeValues[pid].value) || 0), 0);
+  }
+
+  function renderTradeCheck() {
+    if (!DATA.tradeValuesLoaded) return;
+
+    el("trade-give-list").innerHTML =
+      DATA.trade.give.map((pid) => tradePlayerRowHtml(pid, "give")).join("") ||
+      `<div class="empty-state">No players added.</div>`;
+    el("trade-get-list").innerHTML =
+      DATA.trade.get.map((pid) => tradePlayerRowHtml(pid, "get")).join("") ||
+      `<div class="empty-state">No players added.</div>`;
+
+    document.querySelectorAll(".trade-remove-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const side = btn.getAttribute("data-remove-side");
+        const pid = btn.getAttribute("data-remove-id");
+        DATA.trade[side] = DATA.trade[side].filter((p) => p !== pid);
+        renderTradeCheck();
+      });
+    });
+
+    const giveTotal = tradeSideTotal("give");
+    const getTotal = tradeSideTotal("get");
+    el("trade-give-total").textContent = `Total: ${giveTotal.toLocaleString()}`;
+    el("trade-get-total").textContent = `Total: ${getTotal.toLocaleString()}`;
+
+    const verdictEl = el("trade-verdict");
+    if (!DATA.trade.give.length && !DATA.trade.get.length) {
+      verdictEl.hidden = true;
+      return;
+    }
+    verdictEl.hidden = false;
+    const diff = getTotal - giveTotal;
+    if (diff === 0) {
+      verdictEl.className = "trade-verdict";
+      verdictEl.textContent = "Dead even in market value.";
+    } else if (diff > 0) {
+      verdictEl.className = "trade-verdict favor";
+      verdictEl.textContent = `This favors you by ${diff.toLocaleString()} in value.`;
+    } else {
+      verdictEl.className = "trade-verdict";
+      verdictEl.textContent = `You're giving up ${Math.abs(diff).toLocaleString()} more in value than you get.`;
+    }
+  }
+
+  function openPlayerPicker(side) {
+    DATA.tradePickerTarget = side;
+    el("player-picker-search").value = "";
+    renderPlayerPickerResults("");
+    el("player-picker-modal").showModal();
+    el("player-picker-search").focus();
+  }
+
+  function renderPlayerPickerResults(query) {
+    const wrap = el("player-picker-list");
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      wrap.innerHTML = `<div class="empty-state">Type a player's name to search.</div>`;
+      return;
+    }
+    const matches = Object.entries(DATA.players)
+      .filter(([, p]) => p.n && p.n.toLowerCase().includes(q))
+      .slice(0, 30);
+    if (!matches.length) {
+      wrap.innerHTML = `<div class="empty-state">No players found.</div>`;
+      return;
+    }
+    wrap.innerHTML = matches
+      .map(([pid, p]) => {
+        const v = DATA.tradeValues[pid];
+        return `<div class="owner-option" data-pid="${escapeHtml(pid)}">
+          <div>
+            <div class="owner-option-name">${escapeHtml(p.n)}</div>
+            <div class="owner-option-sub">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}${v ? ` · value ${v.value}` : ""}</div>
+          </div>
+        </div>`;
+      })
+      .join("");
+    wrap.querySelectorAll(".owner-option").forEach((node) => {
+      node.addEventListener("click", () => {
+        const pid = node.getAttribute("data-pid");
+        const side = DATA.tradePickerTarget;
+        if (side && !DATA.trade[side].includes(pid)) DATA.trade[side].push(pid);
+        el("player-picker-modal").close();
+        renderTradeCheck();
+      });
+    });
+  }
+
+  function initTrade() {
+    el("trade-add-give").addEventListener("click", () => openPlayerPicker("give"));
+    el("trade-add-get").addEventListener("click", () => openPlayerPicker("get"));
+    el("player-picker-close").addEventListener("click", () => el("player-picker-modal").close());
+    el("player-picker-modal").addEventListener("click", (e) => {
+      if (e.target === el("player-picker-modal")) el("player-picker-modal").close();
+    });
+    el("player-picker-search").addEventListener("input", (e) => renderPlayerPickerResults(e.target.value));
   }
 
   function renderAll() {
@@ -614,6 +835,8 @@
         DATA.recentPerf = {};
       }
 
+      await loadMatchupDiff(week, league.season);
+
       renderAll();
       hideError();
 
@@ -634,12 +857,13 @@
   }
 
   function initTabs() {
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
+    document.querySelectorAll(".tab-chip").forEach((btn) => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".tab-chip").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         const view = btn.getAttribute("data-view");
         document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== `view-${view}`));
+        if (view === "trade" && !DATA.tradeValuesLoaded) loadTradeValues();
       });
     });
   }
@@ -658,6 +882,7 @@
   function init() {
     initTabs();
     initSettings();
+    initTrade();
     refreshCycle();
     setInterval(refreshCycle, REFRESH_MS);
     document.addEventListener("visibilitychange", () => {

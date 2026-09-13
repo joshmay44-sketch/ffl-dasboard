@@ -50,7 +50,7 @@ html, body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -294,34 +294,38 @@ main { flex: 1; padding: 10px 16px 24px; }
 /* Waiver wire */
 .waiver-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 2px; }
 
-/* Tab bar */
-.tabbar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
+/* Tab strip */
+.tabstrip {
+  position: sticky;
+  top: 57px;
+  z-index: 9;
   display: flex;
-  max-width: 640px;
-  margin: 0 auto;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 10px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch;
+}
+.tabstrip::-webkit-scrollbar { display: none; }
+.tab-chip {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
   background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.tab-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 8px 0 6px;
-  background: transparent;
-  border: none;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
-.tab-btn.active { color: var(--accent); }
+.tab-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 /* Settings modal */
 .settings-modal {
@@ -352,6 +356,71 @@ main { flex: 1; padding: 10px 16px 24px; }
 .owner-option img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: var(--surface); }
 .owner-option-name { font-size: 14px; font-weight: 600; }
 .owner-option-sub { font-size: 11px; color: var(--text-dim); }
+
+/* Trade check */
+.trade-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 420px) {
+  .trade-columns { grid-template-columns: 1fr; }
+}
+.trade-side-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.trade-add-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trade-total {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+.trade-verdict {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+.trade-verdict.favor { border-color: var(--accent-2); color: var(--accent-2); }
+.trade-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.player-search {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
 
 @media (min-width: 480px) {
   main { padding-left: 20px; padding-right: 20px; }
