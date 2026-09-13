@@ -33,6 +33,7 @@
       <button class="tab-chip" data-view="startsit">Start/Sit</button>
       <button class="tab-chip" data-view="waiver">Waivers</button>
       <button class="tab-chip" data-view="trade">Trade Check</button>
+      <button class="tab-chip" data-view="power">Power Rankings</button>
     </nav>
 
     <div id="last-updated" class="last-updated">Loading…</div>
@@ -99,6 +100,16 @@
           </div>
         </div>
         <div id="trade-verdict" class="trade-verdict" hidden></div>
+      </section>
+
+      <section id="view-power" class="view" hidden>
+        <p class="section-note">Ranks every team by total projected points across their actual current starters this week — the same projection model used in Start/Sit (recent scoring blended with real defense-vs-position data). This is a strength ranking, not your actual W-L standings, and a team with an easy schedule of blowout wins can rank lower here than one that's been in close, competitive games.</p>
+        <table class="standings-table">
+          <thead>
+            <tr><th class="rank-col">#</th><th>Team</th><th>W-L-T</th><th>Projected</th></tr>
+          </thead>
+          <tbody id="power-body"></tbody>
+        </table>
       </section>
     </main>
   </div>

@@ -120,22 +120,25 @@
     return data;
   }
 
-  // Average fantasy points per player over the last few completed weeks, for this roster.
-  async function computeRecentPerformance(rosterId, currentWeek) {
+  // Average fantasy points per player over the last few completed weeks, league-wide
+  // (every roster's players_points for that week, not just one roster) — so Power
+  // Rankings and any cross-team comparison get real recent-form data for every
+  // player, not just the ones on your own roster.
+  async function computeRecentPerformance(currentWeek) {
     const perPlayer = {};
     for (let w = currentWeek - 1; w >= Math.max(1, currentWeek - RECENT_WEEKS_BACK); w--) {
       try {
         const wk = await getWeekMatchups(w, true);
-        const mine = wk.find((m) => m.roster_id === rosterId);
-        if (mine && mine.players_points) {
-          for (const pid in mine.players_points) {
-            const pts = mine.players_points[pid];
+        wk.forEach((entry) => {
+          if (!entry.players_points) return;
+          for (const pid in entry.players_points) {
+            const pts = entry.players_points[pid];
             if (pts === null || pts === undefined) continue;
             if (!perPlayer[pid]) perPlayer[pid] = { sum: 0, n: 0 };
             perPlayer[pid].sum += pts;
             perPlayer[pid].n += 1;
           }
-        }
+        });
       } catch (e) { /* week not available — skip it */ }
     }
     return perPlayer;
@@ -504,6 +507,39 @@
           <td>${r.settings.wins || 0}-${r.settings.losses || 0}${r.settings.ties ? "-" + r.settings.ties : ""}</td>
           <td>${pf}</td>
           <td>${pa}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  function renderPowerRankings() {
+    const body = el("power-body");
+    if (!body) return;
+    const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+
+    const scored = DATA.rosters.map((r) => {
+      const total = (r.starters || [])
+        .filter((pid) => pid && pid !== "0")
+        .reduce((sum, pid) => sum + (projectPoints(pid) || 0), 0);
+      return { roster: r, total };
+    });
+    scored.sort((a, b) => b.total - a.total);
+
+    body.innerHTML = scored
+      .map((s, i) => {
+        const r = s.roster;
+        const user = userFor(r.owner_id);
+        const name = teamNameFor(r.owner_id);
+        const isMe = myRoster && r.roster_id === myRoster.roster_id;
+        const av = user ? avatarUrl(user.avatar) : "";
+        return `<tr>
+          <td class="rank-col">${i + 1}</td>
+          <td><div class="standings-team">
+            ${av ? `<img class="standings-avatar" alt="" src="${av}" />` : `<div class="standings-avatar"></div>`}
+            <span class="standings-name${isMe ? " me" : ""}">${escapeHtml(name)}</span>
+          </div></td>
+          <td>${r.settings.wins || 0}-${r.settings.losses || 0}${r.settings.ties ? "-" + r.settings.ties : ""}</td>
+          <td>${fmtPts(s.total)}</td>
         </tr>`;
       })
       .join("");
@@ -939,6 +975,7 @@
     renderTopbar();
     renderMatchups();
     renderStandings();
+    renderPowerRankings();
     renderMyTeam();
     renderInjuryBanner();
     renderStartSit();
@@ -971,7 +1008,7 @@
         DATA.myUserId = node.getAttribute("data-user-id");
         localStorage.setItem(MY_USER_KEY, DATA.myUserId);
         el("settings-modal").close();
-        refreshCycle(); // recompute recent-performance data for the newly selected roster
+        refreshCycle(); // re-render everything that depends on which roster is "mine"
       });
     });
   }
@@ -1015,12 +1052,7 @@
       DATA.week = week;
       DATA.trending = trending;
 
-      if (DATA.myUserId) {
-        const myRoster = rosterForUser(DATA.myUserId);
-        DATA.recentPerf = myRoster ? await computeRecentPerformance(myRoster.roster_id, week) : {};
-      } else {
-        DATA.recentPerf = {};
-      }
+      DATA.recentPerf = await computeRecentPerformance(week);
 
       await loadMatchupDiff(week, league.season);
       await ensureDVP();
