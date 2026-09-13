@@ -540,11 +540,15 @@
           const winning = (m.points || 0) > (other.points || 0) && (m.points || 0) > 0;
           const av = user ? avatarUrl(user.avatar) : "";
           const prob = probA === null ? null : m === a ? probA : 1 - probA;
+          const proj = m === a ? projA : projB;
+          const filledSlots = roster ? (roster.starters || []).filter((pid) => pid && pid !== "0").length : null;
+          const totalSlots = roster ? (roster.starters || []).length : null;
+          const incomplete = filledSlots !== null && totalSlots !== null && filledSlots < totalSlots;
           return `<div class="matchup-row">
             ${av ? `<img class="matchup-avatar" alt="" src="${av}" />` : `<div class="matchup-avatar"></div>`}
             <div class="matchup-team">
               <div class="matchup-team-name">${escapeHtml(name)}${isMe ? " (You)" : ""}</div>
-              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}${prob !== null ? ` · ${Math.round(prob * 100)}% to win` : ""}</div>
+              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}${proj !== null ? ` · proj ${fmtPts(proj)}` : ""}${prob !== null ? ` · ${Math.round(prob * 100)}% to win` : ""}${incomplete ? ` · ${escapeHtml(`${filledSlots}/${totalSlots} slots filled`)}` : ""}</div>
             </div>
             <div class="matchup-score${winning ? " winning" : ""}">${(m.points || 0).toFixed(2)}</div>
           </div>`;
