@@ -52,7 +52,12 @@
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   const DVP_CACHE_PREFIX = "ffl_dvp_v2_";
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
-  const DVP_POSITIONS = ["QB", "RB", "WR", "TE"];
+  const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
+  // Streaming-relevant positions: for these, Sleeper's precomputed point fields
+  // use its own standard scoring for points-allowed/FG-distance brackets, which
+  // may not exactly match a league's custom bracket values — lower confidence
+  // than the skill-position numbers above.
+  const STREAM_POSITIONS = ["DEF", "K"];
   const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
 
   const el = (id) => document.getElementById(id);
@@ -769,6 +774,48 @@
         .join("");
   }
 
+  function renderStreamers() {
+    const defWrap = el("streamer-def-list");
+    const kWrap = el("streamer-k-list");
+    if (!defWrap || !kWrap) return;
+
+    const takenIds = new Set();
+    DATA.rosters.forEach((r) => (r.players || []).forEach((pid) => takenIds.add(pid)));
+
+    function topAvailable(position) {
+      return Object.entries(DATA.players)
+        .filter(([pid, p]) => p.p === position && !takenIds.has(pid))
+        .map(([pid, p]) => ({ pid, info: p, proj: projectPoints(pid) }))
+        .filter((x) => x.proj !== null)
+        .sort((a, b) => b.proj - a.proj)
+        .slice(0, 5);
+    }
+
+    function row(x) {
+      const p = x.info;
+      const opp = opponentInfoFor(x.pid);
+      const oppText = opp ? `vs ${opp.opponent}${opp.opponentRecord ? ` (${opp.opponentRecord})` : ""}` : "opponent unknown";
+      return `<div class="player-card">
+        <div class="player-slot">${escapeHtml(p.p)}</div>
+        <div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>
+        <div class="player-info">
+          <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
+          <div class="player-meta">${escapeHtml(oppText)}</div>
+        </div>
+        <div class="player-points">${fmtPts(x.proj)}</div>
+      </div>`;
+    }
+
+    const defs = topAvailable("DEF");
+    const ks = topAvailable("K");
+    defWrap.innerHTML =
+      `<div class="waiver-note">Top available defenses this week</div>` +
+      (defs.length ? defs.map(row).join("") : `<div class="empty-state">No defense projections available right now.</div>`);
+    kWrap.innerHTML =
+      `<div class="waiver-note">Top available kickers this week</div>` +
+      (ks.length ? ks.map(row).join("") : `<div class="empty-state">No kicker projections available right now.</div>`);
+  }
+
   function tradePlayerRowHtml(playerId, side) {
     const p = DATA.players[playerId] || { n: playerId, p: "", t: "" };
     const v = DATA.tradeValues[playerId];
@@ -896,6 +943,7 @@
     renderInjuryBanner();
     renderStartSit();
     renderWaiver();
+    renderStreamers();
   }
 
   function renderOwnerPicker() {

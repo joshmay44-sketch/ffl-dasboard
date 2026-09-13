@@ -15,7 +15,13 @@ Six tabs, each its own screen (no more everything stacked on one page):
   simple difficulty signal. If that lookup fails, it says so and falls back to
   scoring + health only.
 - **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
-  on any roster in your league, prioritized toward your thin positions. Informational
+  on any roster in your league, prioritized toward your thin positions, plus a
+  **Defense & Kicker Streamers** section: every available DEF/K ranked purely by
+  this week's matchup (not roster need), for weekly streaming. Defense projections
+  reuse the same real-stats DVP engine — a defense's projection is literally "how
+  many fantasy points have defenses scored against this week's opponent." Lower
+  confidence than the skill-position numbers: Sleeper's points-allowed/FG-distance
+  bracket scoring may not exactly match this league's custom brackets. Informational
   only — Sleeper's API is read-only, so there's no in-app "add" button.
 - **Trade Check** — pick players on each side of a proposed trade and compare total
   market value, pulled from **FantasyCalc** (a community trade-value tool keyed
