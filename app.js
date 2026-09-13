@@ -42,11 +42,18 @@
     tradeValuesFailed: false,
     trade: { give: [], get: [] },
     tradePickerTarget: null,
+    dvp: {},
+    dvpSource: null,
+    dvpFailed: false,
   };
 
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+  const DVP_CACHE_PREFIX = "ffl_dvp_v2_";
+  const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
+  const DVP_POSITIONS = ["QB", "RB", "WR", "TE"];
+  const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
 
   const el = (id) => document.getElementById(id);
   const escapeHtml = (s) =>
@@ -171,6 +178,127 @@
     const p = DATA.players[playerId];
     if (!p || !p.t || !DATA.matchupDiff[p.t]) return null;
     return DATA.matchupDiff[p.t];
+  }
+
+  // Which of Sleeper's precomputed point fields matches this league's scoring.
+  function scoringField() {
+    const rec = (DATA.league && DATA.league.scoring_settings && DATA.league.scoring_settings.rec) || 0;
+    if (rec >= 1) return "pts_ppr";
+    if (rec >= 0.5) return "pts_half_ppr";
+    return "pts_std";
+  }
+  function pointsFromStatLine(line, field) {
+    if (!line) return null;
+    const v = line[field] ?? line.pts_ppr ?? line.pts_half_ppr ?? line.pts_std;
+    return typeof v === "number" ? v : null;
+  }
+
+  // Real box-score stats for every NFL player in a given week (not just this league's rosters).
+  async function fetchWeekStats(season, week) {
+    try {
+      return await fetchJSON(`${BASE}/stats/nfl/regular/${season}/${week}`);
+    } catch (e) {
+      return null;
+    }
+  }
+  // Reuses the same opponent-lookup endpoint built for Start/Sit, for an arbitrary past week.
+  async function fetchWeekSchedule(season, week) {
+    try {
+      const res = await fetch(`/api/matchup-difficulty?week=${week}&season=${season}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      return json.teams || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Defense-vs-position: for each real game in the given weeks, attributes the
+  // fantasy points a player scored to their opponent's defense at that position.
+  // Built entirely from real results — no rankings or opinions borrowed from anyone.
+  async function computeDVPForRange(season, weeks) {
+    const field = scoringField();
+    const table = {}; // opponent team -> position -> { sum, n }
+    const weekResults = await Promise.all(
+      weeks.map((w) => Promise.all([fetchWeekStats(season, w), fetchWeekSchedule(season, w)]))
+    );
+    for (const [stats, schedule] of weekResults) {
+      if (!stats || !schedule) continue;
+      for (const pid in stats) {
+        const p = DATA.players[pid];
+        if (!p || !p.t || !DVP_POSITIONS.includes(p.p)) continue;
+        const oppInfo = schedule[p.t];
+        if (!oppInfo) continue;
+        const pts = pointsFromStatLine(stats[pid], field);
+        if (pts === null) continue;
+        const opp = oppInfo.opponent;
+        if (!table[opp]) table[opp] = {};
+        if (!table[opp][p.p]) table[opp][p.p] = { sum: 0, n: 0 };
+        table[opp][p.p].sum += pts;
+        table[opp][p.p].n += 1;
+      }
+    }
+    const avg = {};
+    for (const team in table) {
+      avg[team] = {};
+      for (const pos in table[team]) avg[team][pos] = table[team][pos].sum / table[team][pos].n;
+    }
+    return avg;
+  }
+
+  async function ensureDVP() {
+    const week = DATA.week;
+    const season = DATA.league.season;
+    const usePrevious = week <= 1;
+    const cacheKey = usePrevious ? `${DVP_CACHE_PREFIX}prev_${season}` : `${DVP_CACHE_PREFIX}${season}_${week}`;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Date.now() - parsed.ts < DVP_MAX_AGE_MS) {
+          DATA.dvp = parsed.data;
+          DATA.dvpSource = parsed.source;
+          DATA.dvpFailed = false;
+          return;
+        }
+      }
+    } catch (e) { /* corrupt cache, recompute */ }
+
+    try {
+      let table, source;
+      if (usePrevious) {
+        const prevSeason = String(Number(season) - 1);
+        table = await computeDVPForRange(prevSeason, Array.from({ length: 18 }, (_, i) => i + 1));
+        source = `${prevSeason} season (no completed ${season} weeks yet)`;
+      } else {
+        table = await computeDVPForRange(season, Array.from({ length: week - 1 }, (_, i) => i + 1));
+        source = `${season}, weeks 1–${week - 1}`;
+      }
+      if (!Object.keys(table).length) throw new Error("empty DVP table");
+      DATA.dvp = table;
+      DATA.dvpSource = source;
+      DATA.dvpFailed = false;
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: table, source })); } catch (e) { /* quota — fine */ }
+    } catch (e) {
+      DATA.dvp = {};
+      DATA.dvpSource = null;
+      DATA.dvpFailed = true;
+    }
+  }
+
+  // Blends a player's own recent scoring with their opponent's defense-vs-position
+  // baseline. A player with no personal history (rookie, new pickup) falls back
+  // entirely to the DVP number, so there's still a real, data-grounded estimate.
+  function projectPoints(playerId) {
+    const p = DATA.players[playerId];
+    if (!p) return null;
+    const recentAvg = avgPts(DATA.recentPerf, playerId);
+    const oppInfo = opponentInfoFor(playerId);
+    const dvpAvg = oppInfo && DATA.dvp[oppInfo.opponent] ? DATA.dvp[oppInfo.opponent][p.p] : undefined;
+    if (recentAvg !== null && dvpAvg !== undefined) return recentAvg * PROJECTION_BLEND + dvpAvg * (1 - PROJECTION_BLEND);
+    if (recentAvg !== null) return recentAvg;
+    if (dvpAvg !== undefined) return dvpAvg;
+    return null;
   }
 
   function leagueTradeParams() {
@@ -447,9 +575,15 @@
   function renderStartSit() {
     const wrap = el("startsit-list");
     const statusEl = el("matchup-diff-status");
-    if (DATA.matchupDiffFailed) {
+    if (DATA.matchupDiffFailed && DATA.dvpFailed) {
       statusEl.hidden = false;
-      statusEl.textContent = "Opponent-strength lookup is unavailable right now — suggestions below use scoring + health only.";
+      statusEl.textContent = "Opponent and defense-vs-position data are both unavailable right now — suggestions below use recent scoring + health only.";
+    } else if (DATA.dvpFailed) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Defense-vs-position data is unavailable right now — projections use recent scoring only, with no matchup adjustment.";
+    } else if (DATA.dvpSource) {
+      statusEl.hidden = false;
+      statusEl.textContent = `Projections blend recent scoring with defense-vs-position data from ${DATA.dvpSource}.`;
     } else {
       statusEl.hidden = true;
     }
@@ -463,7 +597,6 @@
     const reserveSet = new Set([...(roster.reserve || []), ...(roster.taxi || [])]);
     const starterSet = new Set(starters);
     const bench = (roster.players || []).filter((pid) => !starterSet.has(pid) && !reserveSet.has(pid));
-    const perf = DATA.recentPerf || {};
     const suggestions = [];
     const usedBench = new Set();
 
@@ -476,15 +609,15 @@
 
     function bestCandidate(pool) {
       let best = null;
-      let bestAvg = -Infinity;
+      let bestProj = -Infinity;
       pool.forEach((bpid) => {
-        const a = avgPts(perf, bpid);
-        if (a !== null && a > bestAvg) {
-          bestAvg = a;
+        const p = projectPoints(bpid);
+        if (p !== null && p > bestProj) {
+          bestProj = p;
           best = bpid;
         }
       });
-      return best === null ? { best: null, bestAvg: null } : { best, bestAvg };
+      return best === null ? { best: null, bestProj: null } : { best, bestProj };
     }
 
     const passes = [
@@ -502,32 +635,32 @@
       if (!candidates.length) return;
       const healthy = candidates.filter((bpid) => !INJURY_FLAGS.includes((DATA.players[bpid] || {}).i));
       const pool = healthy.length ? healthy : candidates;
-      const { best, bestAvg } = bestCandidate(pool);
+      const { best, bestProj } = bestCandidate(pool);
       const chosen = best !== null ? best : pool[0];
-      const chosenAvg = best !== null ? bestAvg : avgPts(perf, pool[0]);
+      const chosenProj = best !== null ? bestProj : projectPoints(pool[0]);
       usedBench.add(chosen);
-      suggestions.push({ starterPid: s.pid, starterAvg: avgPts(perf, s.pid), benchPid: chosen, benchAvg: chosenAvg, reason: "injury", slot: s.slot });
+      suggestions.push({ starterPid: s.pid, starterAvg: projectPoints(s.pid), benchPid: chosen, benchAvg: chosenProj, reason: "injury", slot: s.slot });
     });
 
     passes[1].forEach((s) => {
       const eligible = flexEligibility(s.slot);
       if (!eligible.length) return;
-      const starterAvg = avgPts(perf, s.pid);
-      if (starterAvg === null) return;
+      const starterProj = projectPoints(s.pid);
+      if (starterProj === null) return;
       const candidates = bench.filter((bpid) => {
         const bp = DATA.players[bpid];
         return bp && eligible.includes(bp.p) && !usedBench.has(bpid);
       });
       if (!candidates.length) return;
-      const { best, bestAvg } = bestCandidate(candidates);
-      if (best !== null && bestAvg - starterAvg >= START_SIT_MARGIN) {
+      const { best, bestProj } = bestCandidate(candidates);
+      if (best !== null && bestProj - starterProj >= START_SIT_MARGIN) {
         usedBench.add(best);
-        suggestions.push({ starterPid: s.pid, starterAvg, benchPid: best, benchAvg: bestAvg, reason: "performance", slot: s.slot });
+        suggestions.push({ starterPid: s.pid, starterAvg: starterProj, benchPid: best, benchAvg: bestProj, reason: "performance", slot: s.slot });
       }
     });
 
     if (!suggestions.length) {
-      wrap.innerHTML = `<div class="empty-state">No changes suggested — your lineup looks solid based on recent scoring and health.</div>`;
+      wrap.innerHTML = `<div class="empty-state">No changes suggested — your lineup looks solid based on projected points and health.</div>`;
       return;
     }
 
@@ -540,10 +673,10 @@
           const code = INJURY_CODES[sp.i] || sp.i;
           reasonText =
             s.benchAvg !== null
-              ? `${sp.n} is ${code} — ${bp.n} has averaged ${fmtPts(s.benchAvg)} pts recently`
+              ? `${sp.n} is ${code} — ${bp.n} projects for ${fmtPts(s.benchAvg)} pts`
               : `${sp.n} is ${code} — ${bp.n} may be the safer play`;
         } else {
-          reasonText = `${bp.n} has outscored ${sp.n} recently (${fmtPts(s.benchAvg)} vs ${fmtPts(s.starterAvg)} avg)`;
+          reasonText = `${bp.n} projects higher than ${sp.n} (${fmtPts(s.benchAvg)} vs ${fmtPts(s.starterAvg)})`;
         }
         const spOpp = opponentInfoFor(s.starterPid);
         const bpOpp = opponentInfoFor(s.benchPid);
@@ -601,8 +734,13 @@
       .map((t) => ({ ...t, info: DATA.players[t.player_id] }))
       .filter((t) => t.info);
 
-    const relevant = available.filter((t) => thinPositions.includes(t.info.p));
-    const shown = (relevant.length ? relevant : available).slice(0, 8);
+    const withProjections = (list) =>
+      list
+        .map((t) => ({ ...t, proj: projectPoints(t.player_id) }))
+        .sort((a, b) => (b.proj ?? -1) - (a.proj ?? -1));
+
+    const relevant = withProjections(available.filter((t) => thinPositions.includes(t.info.p)));
+    const shown = (relevant.length ? relevant : withProjections(available)).slice(0, 8);
 
     if (!shown.length) {
       wrap.innerHTML = `<div class="empty-state">No trending waiver targets available right now.</div>`;
@@ -610,8 +748,8 @@
     }
 
     const note = relevant.length
-      ? `Matched to your thin position${thinPositions.length > 1 ? "s" : ""}: ${thinPositions.join(", ")}`
-      : `No trending adds match your thin spots — showing top adds league-wide`;
+      ? `Matched to your thin position${thinPositions.length > 1 ? "s" : ""}: ${thinPositions.join(", ")} · ranked by projected points`
+      : `No trending adds match your thin spots — showing top adds league-wide, ranked by projected points`;
 
     wrap.innerHTML =
       `<div class="waiver-note">${escapeHtml(note)}${rosterFull ? " · your roster is full, this would require a drop" : ""}</div>` +
@@ -625,6 +763,7 @@
               <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
               <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""} · added in ${t.count} leagues today</div>
             </div>
+            <div class="player-points">${t.proj !== null ? fmtPts(t.proj) : "—"}</div>
           </div>`;
         })
         .join("");
@@ -836,6 +975,7 @@
       }
 
       await loadMatchupDiff(week, league.season);
+      await ensureDVP();
 
       renderAll();
       hideError();

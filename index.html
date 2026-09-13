@@ -66,13 +66,13 @@
       </section>
 
       <section id="view-startsit" class="view" hidden>
-        <p class="section-note">Flags a bench player as a likely upgrade using recent scoring (last 3 completed weeks), injury status, and — where available — opponent strength for the week. When the opponent-strength lookup fails, suggestions fall back to scoring + health only.</p>
+        <p class="section-note">Flags a bench player as a likely upgrade using a projection blending recent scoring with a defense-vs-position model built from real box scores (this season once weeks exist, last season's data as an early-season fallback), plus injury status. No expert rankings or opinions involved — degrades gracefully to recent scoring alone if the matchup data is unavailable.</p>
         <div id="matchup-diff-status" class="waiver-note" hidden></div>
         <div id="startsit-list" class="stack"></div>
       </section>
 
       <section id="view-waiver" class="view" hidden>
-        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league and prioritized toward your thin positions. Informational only — Sleeper's API is read-only, so make the actual claim in the Sleeper app.</p>
+        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league, matched to your thin positions, and ranked by the same projection model used in Start/Sit. Informational only — Sleeper's API is read-only, so make the actual claim in the Sleeper app.</p>
         <div id="waiver-list" class="stack"></div>
       </section>
 
