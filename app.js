@@ -54,7 +54,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v5_"; // bumped: DEF now uses custom league-scoring calc, not Sleeper's generic preset
+  const DVP_CACHE_PREFIX = "ffl_dvp_v6_"; // bumped: ALL positions now use custom league-scoring calc, not Sleeper's generic preset
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -277,6 +277,33 @@
     return typeof v === "number" ? v : null;
   }
 
+  // Generic engine: Sleeper computes its own pts_ppr/pts_half_ppr/pts_std
+  // fields as a dot product of raw per-stat counts (pass_yd, rec, rec_yd,
+  // rush_td, bonus_rec_yd_100, fgm_40_49, ...) against a scoring table — that's
+  // true for every position, not just defense. Doing that same dot product
+  // ourselves against THIS league's actual scoring_settings, instead of
+  // trusting Sleeper's generic preset, is what lets custom bonuses (TE
+  // premium, yardage bonuses, distance-bucketed kicker/defense scoring, etc.)
+  // actually show up in projections. Points-allowed brackets are excluded
+  // here since they're keyed by opponent score, not a per-stat count — those
+  // are handled separately by pointsAllowBracketPoints below.
+  function customPointsFromStatLine(statLine, scoringSettings) {
+    if (!statLine || !scoringSettings) return { points: null, matched: false };
+    let total = 0;
+    let matched = false;
+    for (const key in scoringSettings) {
+      if (key.startsWith("pts_allow_") || key.startsWith("yds_allow_")) continue;
+      const weight = scoringSettings[key];
+      if (typeof weight !== "number" || weight === 0) continue;
+      const statVal = statLine[key];
+      if (typeof statVal === "number") {
+        total += statVal * weight;
+        matched = true;
+      }
+    }
+    return { points: matched ? total : null, matched };
+  }
+
   // Points-allowed brackets in ascending order — the dominant swing factor in
   // most leagues' defense scoring (often a 10+ point spread shutout-to-blowout),
   // and the piece most likely to diverge from Sleeper's generic preset since
@@ -290,32 +317,23 @@
     { max: 34, key: "pts_allow_28_34" },
     { max: Infinity, key: "pts_allow_35p" },
   ];
-  // Computes a defense's fantasy points from raw box-score stats using THIS
-  // league's actual configured scoring values, instead of trusting Sleeper's
-  // generic pts_ppr/pts_std default (which uses its own bracket values, not
-  // this league's custom ones). Best-effort: only applies what it can actually
-  // match, and reports whether it found real data to work with.
+  function pointsAllowBracketPoints(statLine, scoringSettings) {
+    if (!statLine || typeof statLine.pts_allow !== "number") return { points: 0, matched: false };
+    const bracket = PTS_ALLOW_BRACKETS.find((b) => statLine.pts_allow <= b.max);
+    if (bracket && typeof scoringSettings[bracket.key] === "number") {
+      return { points: scoringSettings[bracket.key], matched: true };
+    }
+    return { points: 0, matched: false };
+  }
+  // Defense points = the generic per-stat dot product (sacks, INTs, forced
+  // fumbles, defensive TDs, ...) plus the points-allowed bracket, which isn't
+  // a simple stat-count multiply.
   function customDefensePoints(statLine, scoringSettings) {
     if (!statLine || !scoringSettings) return { points: null, matched: false };
-    let total = 0;
-    let matched = false;
-
-    if (typeof statLine.pts_allow === "number") {
-      const bracket = PTS_ALLOW_BRACKETS.find((b) => statLine.pts_allow <= b.max);
-      if (bracket && typeof scoringSettings[bracket.key] === "number") {
-        total += scoringSettings[bracket.key];
-        matched = true;
-      }
-    }
-    const simpleStats = { sack: "sack", int: "int", fum_rec: "fum_rec", ff: "ff", safe: "safe", blk_kick: "blk_kick", def_td: "def_td" };
-    for (const statKey in simpleStats) {
-      const settingKey = simpleStats[statKey];
-      if (typeof statLine[statKey] === "number" && typeof scoringSettings[settingKey] === "number") {
-        total += statLine[statKey] * scoringSettings[settingKey];
-        matched = true;
-      }
-    }
-    return { points: matched ? total : null, matched };
+    const generic = customPointsFromStatLine(statLine, scoringSettings);
+    const bracket = pointsAllowBracketPoints(statLine, scoringSettings);
+    const matched = generic.matched || bracket.matched;
+    return { points: matched ? (generic.points || 0) + (bracket.points || 0) : null, matched };
   }
 
   // Real box-score stats for every NFL player in a given week (not just this league's rosters).
@@ -355,6 +373,8 @@
     let observations = 0; // actually attributed into the table (also needs a schedule match)
     let defCustomMatched = 0;
     let defCustomTotal = 0;
+    let offCustomMatched = 0;
+    let offCustomTotal = 0;
     for (const [stats, schedule] of weekResults) {
       if (!stats || !schedule) continue;
       weeksWithData++;
@@ -369,7 +389,10 @@
           if (custom.matched) defCustomMatched++;
           pts = custom.points !== null ? custom.points : pointsFromStatLine(stats[pid], field);
         } else {
-          pts = pointsFromStatLine(stats[pid], field);
+          offCustomTotal++;
+          const custom = customPointsFromStatLine(stats[pid], scoringSettings);
+          if (custom.matched) offCustomMatched++;
+          pts = custom.points !== null ? custom.points : pointsFromStatLine(stats[pid], field);
         }
         if (pts === null) continue;
         statLinesUsable++;
@@ -394,7 +417,7 @@
     return {
       avg,
       perPlayer,
-      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field, defCustomMatched, defCustomTotal },
+      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field, defCustomMatched, defCustomTotal, offCustomMatched, offCustomTotal },
     };
   }
 
@@ -431,7 +454,10 @@
       const defNote = d.defCustomTotal
         ? `, DEF custom-scoring matched ${d.defCustomMatched}/${d.defCustomTotal}`
         : "";
-      const source = `${sourceLabel} — ${d.weeksWithData}/${d.weeksAttempted} weeks of data, ${d.observations} player-games, field "${d.field}"${defNote}`;
+      const offNote = d.offCustomTotal
+        ? `, offense custom-scoring matched ${d.offCustomMatched}/${d.offCustomTotal}`
+        : "";
+      const source = `${sourceLabel} — ${d.weeksWithData}/${d.weeksAttempted} weeks of data, ${d.observations} player-games, field "${d.field}"${defNote}${offNote}`;
       const table = result.avg;
       if (!Object.keys(table).length) throw new Error("empty DVP table");
       DATA.dvp = table;
@@ -1023,6 +1049,23 @@
     return Object.keys(required).filter((pos) => (counts[pos] || 0) <= required[pos]);
   }
 
+  // Your single weakest rostered player at each position, by projection — the
+  // player an available add would actually have to beat to be worth a pickup.
+  // This catches real upgrade opportunities even when a position isn't
+  // numerically "thin" (e.g. you have four bench WRs but they're all replacement-level).
+  function rosterFloorByPosition(roster) {
+    const floor = {};
+    (roster.players || []).forEach((pid) => {
+      const p = DATA.players[pid];
+      if (!p || !p.p) return;
+      const proj = projectPoints(pid);
+      if (proj === null) return;
+      if (!floor[p.p] || proj < floor[p.p].proj) floor[p.p] = { pid, name: p.n, proj };
+    });
+    return floor;
+  }
+  const WAIVER_UPGRADE_MARGIN = 2; // pts — ignore noise-level differences
+
   function renderWaiver() {
     const wrap = el("waiver-list");
     const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
@@ -1038,6 +1081,7 @@
     const takenIds = new Set();
     DATA.rosters.forEach((r) => (r.players || []).forEach((pid) => takenIds.add(pid)));
     const thinPositions = computeThinPositions(roster);
+    const floor = rosterFloorByPosition(roster);
     const totalSlots = (DATA.league.roster_positions || []).filter((s) => s !== "IR" && s !== "TAXI").length;
     const rosterFull = (roster.players || []).length >= totalSlots;
 
@@ -1048,11 +1092,18 @@
 
     const withProjections = (list) =>
       list
-        .map((t) => ({ ...t, proj: projectPoints(t.player_id) }))
+        .map((t) => {
+          const proj = projectPoints(t.player_id);
+          const f = floor[t.info.p];
+          const isThin = thinPositions.includes(t.info.p);
+          const beatsFloor = !!(f && proj !== null && proj > f.proj + WAIVER_UPGRADE_MARGIN);
+          return { ...t, proj, isThin, beatsFloor, floorEntry: f };
+        })
         .sort((a, b) => (b.proj ?? -1) - (a.proj ?? -1));
 
-    const relevant = withProjections(available.filter((t) => thinPositions.includes(t.info.p)));
-    const shown = (relevant.length ? relevant : withProjections(available)).slice(0, 8);
+    const annotated = withProjections(available);
+    const relevant = annotated.filter((t) => t.isThin || t.beatsFloor);
+    const shown = (relevant.length ? relevant : annotated).slice(0, 10);
 
     if (!shown.length) {
       wrap.innerHTML = `<div class="empty-state">No trending waiver targets available right now.</div>`;
@@ -1060,20 +1111,29 @@
     }
 
     const note = relevant.length
-      ? `Matched to your thin position${thinPositions.length > 1 ? "s" : ""}: ${thinPositions.join(", ")} · ranked by projected points`
-      : `No trending adds match your thin spots — showing top adds league-wide, ranked by projected points`;
+      ? `Flags trending adds that fill a thin spot${thinPositions.length ? ` (${thinPositions.join(", ")})` : ""} or would outscore your current weakest player at that position — ranked by projected points`
+      : `No trending adds beat your current roster right now — showing top adds league-wide, ranked by projected points`;
 
     wrap.innerHTML =
       `<div class="waiver-note">${escapeHtml(note)}${rosterFull ? " · your roster is full, this would require a drop" : ""}</div>` +
       shown
         .map((t) => {
           const p = t.info;
+          let reason = "";
+          if (t.isThin && t.beatsFloor && t.floorEntry) {
+            reason = `Fills a thin spot, and beats ${escapeHtml(t.floorEntry.name)} (${fmtPts(t.floorEntry.proj)})`;
+          } else if (t.isThin) {
+            reason = `Fills a thin spot at ${escapeHtml(p.p || "")}`;
+          } else if (t.beatsFloor && t.floorEntry) {
+            reason = `Would beat ${escapeHtml(t.floorEntry.name)}, your weakest ${escapeHtml(p.p || "")} (${fmtPts(t.floorEntry.proj)})`;
+          }
           return `<div class="player-card">
             <div class="player-slot">${escapeHtml(p.p || "")}</div>
             <div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>
             <div class="player-info">
               <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
               <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""} · added in ${t.count} leagues today</div>
+              ${reason ? `<div class="player-meta">${reason}</div>` : ""}
             </div>
             <div class="player-points">${t.proj !== null ? fmtPts(t.proj) : "—"}</div>
           </div>`;

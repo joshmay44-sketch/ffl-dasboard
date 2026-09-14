@@ -22,16 +22,25 @@ Six tabs, each its own screen (no more everything stacked on one page):
   blend in every backup who saw the field and understate real starters), blended
   with a defense-vs-position projection built from real box scores. Only a true
   rookie with zero track record anywhere falls back to the generic position
-  average, since that's the only signal available for them.
+  average, since that's the only signal available for them. Every historical
+  average is computed by taking each player's raw box-score stats (yards,
+  receptions, TDs, sacks, points allowed, etc.) and running them through this
+  league's *actual* `scoring_settings` — not Sleeper's generic `pts_ppr`/`pts_std`
+  preset, which uses its own default bonus/bracket values and won't reflect any
+  custom scoring (TE premium, yardage bonuses, custom points-allowed/FG-distance
+  brackets, etc.) your league has configured. The Start/Sit status line reports
+  how much of the available stat data actually matched your league's scoring keys
+  (e.g. "offense custom-scoring matched 340/360"), so the coverage is verifiable
+  rather than just asserted.
 - **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
-  on any roster in your league, prioritized toward your thin positions, plus a
+  on any roster in your league. A player is surfaced if they fill a thin roster
+  spot **or** project (via the same engine above) to outscore your current
+  weakest rostered player at that position — a real upgrade check, not just a
+  numeric slot count — with the reason spelled out on each card. Also includes a
   **Defense & Kicker Streamers** section: every available DEF/K ranked purely by
-  this week's matchup (not roster need), for weekly streaming. Defense projections
-  reuse the same real-stats DVP engine — a defense's projection is literally "how
-  many fantasy points have defenses scored against this week's opponent." Lower
-  confidence than the skill-position numbers: Sleeper's points-allowed/FG-distance
-  bracket scoring may not exactly match this league's custom brackets. Informational
-  only — Sleeper's API is read-only, so there's no in-app "add" button.
+  this week's matchup (not roster need), for weekly streaming, using the same
+  league-accurate custom scoring. Informational only — Sleeper's API is read-only,
+  so there's no in-app "add" button.
 - **Trade Check** — pick players on each side of a proposed trade and compare total
   market value, pulled from **FantasyCalc** (a community trade-value tool keyed
   directly off Sleeper player IDs) — a genuinely different data source than Sleeper.
