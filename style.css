@@ -8,13 +8,13 @@
   --surface: #131a2b;
   --surface-2: #1b2338;
   --text: #f3f5fa;
-  --text-dim: #b3bad0; /* was #8b93ac — still legible above ~10-11px, at that size the old value read as too low-contrast to comfortably read */
+  --text-dim: #d3d7e6; /* was #8b93ac, then #b3bad0 — pushed further after both still read as too grey on a real device at the small sizes used everywhere */
   --border: #232c44;
   --accent: #17e0b3;
   --accent-2: #17e0b3;
   --live: #17e0b3;
   --q: #f0c53e;
-  --d: #ff9d4d;
+  --d: #ffb066; /* was #ff9d4d — brightened alongside text-dim, since "proj" text was called out specifically */
   --o: #ff5c72;
   --ir: #d1495c;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
@@ -218,7 +218,7 @@ main { flex: 1; padding: 10px 16px 24px; }
 .player-slot {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text-dim);
+  color: var(--text); /* was --text-dim — a 2-4 char badge gains nothing from being dimmed and loses a lot of legibility at 10px */
   width: 34px;
   flex-shrink: 0;
   text-align: center;
@@ -266,7 +266,7 @@ main { flex: 1; padding: 10px 16px 24px; }
 .suggestion-slot {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text-dim);
+  color: var(--text); /* was --text-dim — same reasoning as .player-slot */
   width: 34px;
   flex-shrink: 0;
   text-align: center;
@@ -391,7 +391,7 @@ main { flex: 1; padding: 10px 16px 24px; }
   text-align: center;
   font-size: 9px;
   font-weight: 700;
-  color: var(--text-dim);
+  color: var(--text); /* was --text-dim — same reasoning as .player-slot, even smaller here at 9px */
   background: var(--surface-2);
   border-radius: 6px;
   padding: 3px 0;
