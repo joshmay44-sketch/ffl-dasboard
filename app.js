@@ -597,8 +597,8 @@
     try {
       const { ppr, numTeams, numQbs, isDynasty } = leagueTradeParams();
       const res = await fetch(`/api/trade-values?ppr=${ppr}&numTeams=${numTeams}&numQbs=${numQbs}&isDynasty=${isDynasty}`);
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || json.error || `status ${res.status}`);
       DATA.tradeValues = json.values || {};
       DATA.tradeValuesLoaded = true;
       DATA.tradeValuesFailed = false;
@@ -608,7 +608,11 @@
       DATA.tradeValuesFailed = true;
       DATA.tradeValuesLoaded = true;
       statusEl.hidden = false;
-      statusEl.textContent = "Trade values are unavailable right now (FantasyCalc lookup failed). Try again later.";
+      // Surface the real upstream detail (from api/trade-values.js's error body)
+      // instead of a fixed generic message — otherwise every failure looks
+      // identical and there's no way to tell a rate limit from a shape change
+      // from FantasyCalc just being down.
+      statusEl.textContent = `Trade values are unavailable right now (${e.message || "FantasyCalc lookup failed"}). Try again later.`;
     }
     renderTradeCheck();
   }

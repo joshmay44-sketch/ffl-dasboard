@@ -12,8 +12,28 @@ module.exports = async (req, res) => {
   const url = `https://api.fantasycalc.com/values/current?isDynasty=${isDynasty}&numQBs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`;
 
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`FantasyCalc responded ${r.status}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let r;
+    try {
+      // Some public APIs quietly reject requests with no/generic User-Agent as
+      // likely bot traffic — a serverless function's default fetch() UA looks
+      // exactly like that. A normal browser-shaped UA plus Accept avoids that
+      // without changing anything about what's actually being requested.
+      r = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          Accept: "application/json",
+        },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!r.ok) {
+      const body = await r.text().catch(() => "");
+      throw new Error(`FantasyCalc responded ${r.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    }
     const data = await r.json();
     if (!Array.isArray(data)) throw new Error("unexpected response shape from FantasyCalc");
 
