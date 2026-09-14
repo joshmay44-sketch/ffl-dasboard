@@ -1,36 +1,38 @@
 :root {
-  --bg: #f4f5f7;
+  --bg: #f5f7fa;
   --surface: #ffffff;
-  --surface-2: #eef0f3;
-  --text: #14161a;
-  --text-dim: #666b76;
-  --border: #e2e4e8;
-  --accent: #2f6fed;
-  --accent-2: #1c9e6e;
-  --live: #1c9e6e;
+  --surface-2: #eef1f6;
+  --text: #10131c;
+  --text-dim: #5b6472;
+  --border: #e1e5ec;
+  --accent: #0ea888;
+  --accent-2: #0ea888;
+  --live: #0ea888;
   --q: #b8860b;
   --d: #d9772b;
-  --o: #d64545;
-  --ir: #8a2c2c;
-  --shadow: 0 1px 3px rgba(20, 22, 26, 0.08);
+  --o: #e0435a;
+  --ir: #a23347;
+  --shadow: 0 1px 3px rgba(16, 19, 28, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --surface: #171a20;
-    --surface-2: #1e222a;
-    --text: #edeef1;
-    --text-dim: #9aa0ac;
-    --border: #262b33;
-    --accent: #5b8dff;
-    --accent-2: #2fbf82;
-    --live: #2fbf82;
-    --q: #e0b23c;
-    --d: #f0954a;
-    --o: #f2665f;
-    --ir: #c25a5a;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    /* Deep navy + teal — in the same family as Sleeper's own look, with our
+       own signature accent hue rather than a straight copy. */
+    --bg: #0a0e1a;
+    --surface: #131a2b;
+    --surface-2: #1b2338;
+    --text: #f3f5fa;
+    --text-dim: #8b93ac;
+    --border: #232c44;
+    --accent: #17e0b3;
+    --accent-2: #17e0b3;
+    --live: #17e0b3;
+    --q: #f0c53e;
+    --d: #ff9d4d;
+    --o: #ff5c72;
+    --ir: #d1495c;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -76,13 +78,13 @@ html, body {
 .refresh-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--live);
-  box-shadow: 0 0 0 0 rgba(47,191,130,.6);
+  box-shadow: 0 0 0 0 rgba(23,224,179,.6);
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(47,191,130,.5); }
-  70% { box-shadow: 0 0 0 6px rgba(47,191,130,0); }
-  100% { box-shadow: 0 0 0 0 rgba(47,191,130,0); }
+  0% { box-shadow: 0 0 0 0 rgba(23,224,179,.5); }
+  70% { box-shadow: 0 0 0 6px rgba(23,224,179,0); }
+  100% { box-shadow: 0 0 0 0 rgba(23,224,179,0); }
 }
 
 .icon-btn {
@@ -106,7 +108,7 @@ html, body {
 .error-banner {
   margin: 10px 16px 0;
   padding: 10px 12px;
-  background: rgba(242, 102, 95, 0.12);
+  background: rgba(224, 67, 90, 0.12);
   border: 1px solid var(--o);
   color: var(--o);
   border-radius: 10px;
@@ -344,14 +346,40 @@ main { flex: 1; padding: 10px 16px 24px; }
 .modal-header h2 { font-size: 17px; margin: 0; }
 
 .matchup-detail-modal { max-height: 85vh; overflow-y: auto; }
-.matchup-detail-team-heading { font-size: 14px; font-weight: 700; margin: 14px 4px 8px; }
-.matchup-detail-team-heading:first-of-type { margin-top: 10px; }
-.matchup-detail-total { font-size: 13px; font-weight: 700; text-align: right; margin: 8px 4px 0; }
-.matchup-detail-divider { height: 1px; background: var(--border); margin: 18px 0; }
-.matchup-detail-stats { display: flex; gap: 12px; flex-shrink: 0; }
-.matchup-detail-stat { text-align: center; min-width: 38px; }
-.matchup-detail-stat-label { display: block; font-size: 9px; text-transform: uppercase; color: var(--text-dim); }
-.matchup-detail-stat-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.matchup-detail-header-row { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 4px; gap: 10px; }
+.matchup-detail-team-heading { font-size: 13px; font-weight: 700; }
+.matchup-detail-team-heading.right { text-align: right; }
+.matchup-detail-total { font-size: 13px; font-weight: 700; }
+.matchup-detail-rows { display: flex; flex-direction: column; gap: 8px; }
+.matchup-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 8px;
+}
+.matchup-slot-label {
+  flex-shrink: 0;
+  width: 34px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 3px 0;
+}
+.slot-side { flex: 1; min-width: 0; }
+.slot-side.right { text-align: right; }
+.slot-side-name-row { display: flex; align-items: center; gap: 4px; }
+.slot-side.right .slot-side-name-row { flex-direction: row-reverse; }
+.slot-side-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot-side-meta { font-size: 10px; color: var(--text-dim); }
+.slot-side-pts { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.slot-side-proj { font-size: 10px; font-weight: 500; color: var(--text-dim); margin-left: 5px; }
+.slot-side.right .slot-side-proj { margin-left: 0; margin-right: 5px; }
 .modal-hint { font-size: 12px; color: var(--text-dim); margin: 6px 0 14px; }
 .owner-picker { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
 .owner-option {

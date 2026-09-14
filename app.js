@@ -518,37 +518,30 @@
     </div>`;
   }
 
-  // Same as playerCardHtml but shows live points AND the projection side by
-  // side, for the matchup drill-down modal — the whole point is seeing how the
-  // team total is actually built up, not just the final number.
-  function matchupPlayerRowHtml(playerId, slotLabel, matchup, idx) {
+  // One side of a slot-by-slot matchup row: a player's name, injury badge, live
+  // points, and projection, mirror-aligned depending on which team's side it's on.
+  function matchupSlotSideHtml(playerId, matchup, idx, align) {
     if (!playerId || playerId === "0") {
-      return `<div class="player-card">
-        <div class="player-slot">${escapeHtml(slotLabel || "")}</div>
-        <div class="player-info"><div class="player-name" style="color:var(--text-dim)">Empty</div></div>
-      </div>`;
+      return `<div class="slot-side ${align}"><div class="slot-side-name" style="color:var(--text-dim)">Empty</div></div>`;
     }
     const p = DATA.players[playerId] || { n: playerId, p: "", t: "", i: null };
     const live = ptsFor(matchup, playerId, idx);
     const proj = projectPoints(playerId);
-    const img =
-      p.p === "DEF"
-        ? ""
-        : `<img class="player-avatar" alt="" loading="lazy" src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg" onerror="this.style.visibility='hidden'" />`;
-    return `<div class="player-card">
-      <div class="player-slot">${escapeHtml(slotLabel || p.p || "")}</div>
-      ${img || `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>`}
-      <div class="player-info">
-        <div class="player-name-row">
-          <span class="player-name">${escapeHtml(p.n)}</span>
-          ${injuryBadge(p.i)}
-        </div>
-        <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+    return `<div class="slot-side ${align}">
+      <div class="slot-side-name-row">
+        ${injuryBadge(p.i)}
+        <span class="slot-side-name">${escapeHtml(p.n)}</span>
       </div>
-      <div class="matchup-detail-stats">
-        <div class="matchup-detail-stat"><span class="matchup-detail-stat-label">Live</span><span class="matchup-detail-stat-value">${fmtPts(live)}</span></div>
-        <div class="matchup-detail-stat"><span class="matchup-detail-stat-label">Proj</span><span class="matchup-detail-stat-value">${fmtPts(proj)}</span></div>
-      </div>
+      <div class="slot-side-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+      <div class="slot-side-pts">${fmtPts(live)}<span class="slot-side-proj">proj ${fmtPts(proj)}</span></div>
+    </div>`;
+  }
+
+  function matchupSlotRowHtml(pidA, pidB, slot, matchupA, matchupB, idx) {
+    return `<div class="matchup-slot-row">
+      ${matchupSlotSideHtml(pidA, matchupA, idx, "left")}
+      <div class="matchup-slot-label">${escapeHtml(slot)}</div>
+      ${matchupSlotSideHtml(pidB, matchupB, idx, "right")}
     </div>`;
   }
 
@@ -559,17 +552,17 @@
     const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
     const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
     const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
+    const startersA = rosterA ? rosterA.starters || [] : [];
+    const startersB = rosterB ? rosterB.starters || [] : [];
 
-    function renderSide(roster, matchup, nameEl, listEl, totalEl) {
-      nameEl.textContent = roster ? teamNameFor(roster.owner_id) : "Team";
-      const starters = roster ? roster.starters || [] : [];
-      listEl.innerHTML =
-        starters.map((pid, idx) => matchupPlayerRowHtml(pid, slotOrder[idx] || "", matchup, idx)).join("") ||
-        `<div class="empty-state">No starters set.</div>`;
-      totalEl.textContent = `Total: ${fmtPts(roster ? teamLiveAdjustedTotal(roster) : 0)}`;
-    }
-    renderSide(rosterA, a, el("matchup-detail-name-a"), el("matchup-detail-list-a"), el("matchup-detail-total-a"));
-    renderSide(rosterB, b, el("matchup-detail-name-b"), el("matchup-detail-list-b"), el("matchup-detail-total-b"));
+    el("matchup-detail-name-a").textContent = rosterA ? teamNameFor(rosterA.owner_id) : "Team";
+    el("matchup-detail-name-b").textContent = rosterB ? teamNameFor(rosterB.owner_id) : "Team";
+    el("matchup-detail-total-a").textContent = `Total: ${fmtPts(rosterA ? teamLiveAdjustedTotal(rosterA) : 0)}`;
+    el("matchup-detail-total-b").textContent = `Total: ${fmtPts(rosterB ? teamLiveAdjustedTotal(rosterB) : 0)}`;
+    el("matchup-detail-rows").innerHTML =
+      slotOrder
+        .map((slot, idx) => matchupSlotRowHtml(startersA[idx], startersB[idx], slot, a, b, idx))
+        .join("") || `<div class="empty-state">No starters set.</div>`;
     el("matchup-detail-title").textContent = `Week ${DATA.week} Matchup`;
     el("matchup-detail-modal").showModal();
   }
