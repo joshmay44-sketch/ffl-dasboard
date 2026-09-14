@@ -8,7 +8,7 @@
   --surface: #131a2b;
   --surface-2: #1b2338;
   --text: #f3f5fa;
-  --text-dim: #8b93ac;
+  --text-dim: #b3bad0; /* was #8b93ac — still legible above ~10-11px, at that size the old value read as too low-contrast to comfortably read */
   --border: #232c44;
   --accent: #17e0b3;
   --accent-2: #17e0b3;
