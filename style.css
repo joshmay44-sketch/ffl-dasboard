@@ -1,39 +1,23 @@
 :root {
-  --bg: #f5f7fa;
-  --surface: #ffffff;
-  --surface-2: #eef1f6;
-  --text: #10131c;
-  --text-dim: #5b6472;
-  --border: #e1e5ec;
-  --accent: #0ea888;
-  --accent-2: #0ea888;
-  --live: #0ea888;
-  --q: #b8860b;
-  --d: #d9772b;
-  --o: #e0435a;
-  --ir: #a23347;
-  --shadow: 0 1px 3px rgba(16, 19, 28, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Deep navy + teal — in the same family as Sleeper's own look, with our
-       own signature accent hue rather than a straight copy. */
-    --bg: #0a0e1a;
-    --surface: #131a2b;
-    --surface-2: #1b2338;
-    --text: #f3f5fa;
-    --text-dim: #8b93ac;
-    --border: #232c44;
-    --accent: #17e0b3;
-    --accent-2: #17e0b3;
-    --live: #17e0b3;
-    --q: #f0c53e;
-    --d: #ff9d4d;
-    --o: #ff5c72;
-    --ir: #d1495c;
-    --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  }
+  /* Deep navy + teal, unconditionally — a fixed brand look (same idea as
+     Sleeper's own app), not something toggled by the device's light/dark
+     setting. A @media (prefers-color-scheme) override here would get
+     re-overridden right back to light by most phones' default reporting,
+     which is exactly why the first version of this never actually showed up. */
+  --bg: #0a0e1a;
+  --surface: #131a2b;
+  --surface-2: #1b2338;
+  --text: #f3f5fa;
+  --text-dim: #8b93ac;
+  --border: #232c44;
+  --accent: #17e0b3;
+  --accent-2: #17e0b3;
+  --live: #17e0b3;
+  --q: #f0c53e;
+  --d: #ff9d4d;
+  --o: #ff5c72;
+  --ir: #d1495c;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 * { box-sizing: border-box; }
@@ -380,6 +364,26 @@ main { flex: 1; padding: 10px 16px 24px; }
 .slot-side-pts { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .slot-side-proj { font-size: 10px; font-weight: 500; color: var(--text-dim); margin-left: 5px; }
 .slot-side.right .slot-side-proj { margin-left: 0; margin-right: 5px; }
+
+.matchup-detail-bench-heading {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 18px 4px 8px;
+}
+.matchup-detail-bench-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bench-compact-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 8px;
+}
+.bench-compact-name { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
+.bench-compact-name span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bench-compact-meta { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+.bench-compact-pts { font-size: 13px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .modal-hint { font-size: 12px; color: var(--text-dim); margin: 6px 0 14px; }
 .owner-picker { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
 .owner-option {

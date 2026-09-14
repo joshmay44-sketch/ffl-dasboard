@@ -476,6 +476,15 @@
   function matchupFor(rosterId) {
     return DATA.matchups.find((m) => m.roster_id === rosterId) || null;
   }
+  // Ensures a two-team matchup pairing always has "my" roster first, so it
+  // consistently renders on the left, both in the matchups list and the detail view.
+  function orderPairMeFirst(pair) {
+    const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!myRoster || pair.length < 2) return pair;
+    return pair[1].roster_id === myRoster.roster_id && pair[0].roster_id !== myRoster.roster_id
+      ? [pair[1], pair[0]]
+      : pair;
+  }
   function ptsFor(matchup, playerId, idx) {
     if (!matchup) return null;
     if (matchup.players_points && playerId in matchup.players_points) return matchup.players_points[playerId];
@@ -545,10 +554,28 @@
     </div>`;
   }
 
+  function benchRowCompactHtml(playerId, matchup) {
+    const p = DATA.players[playerId] || { n: playerId, p: "", t: "", i: null };
+    const live = ptsFor(matchup, playerId);
+    const proj = projectPoints(playerId);
+    return `<div class="bench-compact-row">
+      <div class="bench-compact-name"><span>${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
+      <div class="bench-compact-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+      <div class="bench-compact-pts">${fmtPts(live)}<span class="slot-side-proj">proj ${fmtPts(proj)}</span></div>
+    </div>`;
+  }
+
+  function benchFor(roster) {
+    if (!roster) return [];
+    const reserveSet = new Set([...(roster.reserve || []), ...(roster.taxi || [])]);
+    const starterSet = new Set(roster.starters || []);
+    return (roster.players || []).filter((pid) => !starterSet.has(pid) && !reserveSet.has(pid));
+  }
+
   function openMatchupDetail(matchupId) {
     const group = DATA.matchups.filter((m) => String(m.matchup_id) === String(matchupId));
     if (group.length < 2) return;
-    const [a, b] = group;
+    const [a, b] = orderPairMeFirst(group);
     const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
     const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
     const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
@@ -563,6 +590,14 @@
       slotOrder
         .map((slot, idx) => matchupSlotRowHtml(startersA[idx], startersB[idx], slot, a, b, idx))
         .join("") || `<div class="empty-state">No starters set.</div>`;
+
+    const benchA = benchFor(rosterA);
+    const benchB = benchFor(rosterB);
+    el("matchup-detail-bench-a").innerHTML =
+      benchA.map((pid) => benchRowCompactHtml(pid, a)).join("") || `<div class="empty-state">None</div>`;
+    el("matchup-detail-bench-b").innerHTML =
+      benchB.map((pid) => benchRowCompactHtml(pid, b)).join("") || `<div class="empty-state">None</div>`;
+
     el("matchup-detail-title").textContent = `Week ${DATA.week} Matchup`;
     el("matchup-detail-modal").showModal();
   }
@@ -626,7 +661,7 @@
           const name = roster ? teamNameFor(roster.owner_id) : "Team";
           return `<div class="matchup-card"><div class="matchup-bye">${escapeHtml(name)} — Bye this week</div></div>`;
         }
-        const [a, b] = group;
+        const [a, b] = orderPairMeFirst(group);
         const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
         const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
         const projA = rosterA ? teamLiveAdjustedTotal(rosterA) : null;
