@@ -1301,6 +1301,13 @@
   // favor. Deliberately one-sided: this tool exists to find offers worth
   // actually sending, not to do neutral analysis, so a trade that's even or
   // favors the other team never shows up here.
+  //
+  // Market value alone doesn't say who actually helps you score more points
+  // the rest of this season, so every candidate also gets the same
+  // projectPoints() comparison used everywhere else in the app, and ranking
+  // also weighs whether the other team has a losing record — a team that's
+  // out of it is a genuinely more realistic trade partner than a 5-0 team
+  // with no reason to shake anything up.
   function computeTradeSuggestions() {
     if (!DATA.tradeValuesLoaded || DATA.tradeValuesFailed) return [];
     const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
@@ -1322,6 +1329,11 @@
       const theirNeeds = computeThinPositions(roster);
       const theirSurplus = computeSurplusPositions(roster);
       const teamName = teamNameFor(roster.owner_id);
+      const wins = roster.settings.wins || 0;
+      const losses = roster.settings.losses || 0;
+      const ties = roster.settings.ties || 0;
+      const oppRecord = `${wins}-${losses}${ties ? `-${ties}` : ""}`;
+      const oppLosingRecord = losses > wins;
 
       const getCandidates = (roster.players || []).filter((pid) => {
         const p = DATA.players[pid];
@@ -1332,18 +1344,23 @@
       giveCandidates.forEach((givePid) => {
         const giveInfo = DATA.players[givePid];
         const giveValue = valueOf(givePid);
+        const projGive = projectPoints(givePid);
         getCandidates.forEach((getPid) => {
           const getInfo = DATA.players[getPid];
           const getValue = valueOf(getPid);
           const edge = getValue - giveValue;
           if (edge <= 0) return;
+          const projGet = projectPoints(getPid);
+          const projEdge = projGive !== null && projGet !== null ? projGet - projGive : null;
+          const projEdgePct = projEdge !== null && projGive > 0 ? projEdge / projGive : 0;
           suggestions.push({
             rosterId: roster.roster_id,
-            teamName,
-            givePid, giveInfo, giveValue,
-            getPid, getInfo, getValue,
+            teamName, oppRecord, oppLosingRecord,
+            givePid, giveInfo, giveValue, projGive,
+            getPid, getInfo, getValue, projGet, projEdge,
             edge,
             edgePct: edge / giveValue,
+            projEdgePct,
             mutualFit: theirNeeds.includes(giveInfo.p),
           });
         });
@@ -1351,12 +1368,21 @@
     });
 
     // Trades that also fill a real need for the other team are the ones they
-    // might actually accept — rank those first, then by your edge within
-    // each group. Keep each player — yours or theirs — in at most one
+    // might actually accept — rank those first. Then favor teams with a
+    // losing record, since a rebuilding manager is more realistically open
+    // to a deal than one that's undefeated. Within each of those groups,
+    // rank by a blend of market-value edge and rest-of-season projection
+    // edge, so a trade that wins on both fronts outranks one that only wins
+    // on trade value. Keep each player — yours or theirs — in at most one
     // suggestion; otherwise the same single valuable player on their roster
     // could get "offered for" by three different players of yours at once,
     // which isn't a real option since they can only complete one of those.
-    suggestions.sort((a, b) => (b.mutualFit - a.mutualFit) || b.edgePct - a.edgePct);
+    suggestions.sort(
+      (a, b) =>
+        (b.mutualFit - a.mutualFit) ||
+        (b.oppLosingRecord - a.oppLosingRecord) ||
+        (b.edgePct + b.projEdgePct - (a.edgePct + a.projEdgePct))
+    );
     const seenGive = new Set();
     const seenGet = new Set();
     const deduped = [];
@@ -1387,18 +1413,33 @@
     }
     wrap.innerHTML = suggestions
       .map((s, idx) => {
-        const reason = s.mutualFit
-          ? `You're thin at ${escapeHtml(s.getInfo.p)}; they're deep there but thin at ${escapeHtml(s.giveInfo.p)} — a real need fit for both sides.`
-          : `You're thin at ${escapeHtml(s.getInfo.p)} and they have surplus depth there, though it's less of a need for them — may take convincing.`;
+        const reasons = [];
+        reasons.push(
+          s.mutualFit
+            ? `You're thin at ${escapeHtml(s.getInfo.p)}; they're deep there but thin at ${escapeHtml(s.giveInfo.p)} — a real need fit for both sides.`
+            : `You're thin at ${escapeHtml(s.getInfo.p)} and they have surplus depth there, though it's less of a need for them — may take convincing.`
+        );
+        if (s.projEdge !== null) {
+          reasons.push(
+            s.projEdge > 0.5
+              ? `Also projects better rest-of-season: +${fmtPts(s.projEdge)} pts/game in your favor.`
+              : s.projEdge < -0.5
+              ? `Note: ${escapeHtml(s.getInfo.n)} currently projects ${fmtPts(Math.abs(s.projEdge))} pts/game lower than ${escapeHtml(s.giveInfo.n)} — this one leans on trade value more than current form, more of a buy-low.`
+              : `Rest-of-season projections are close (${fmtPts(s.projGive)} vs ${fmtPts(s.projGet)} pts/game) — this is mostly a trade-value play.`
+          );
+        }
+        if (s.oppLosingRecord) {
+          reasons.push(`${escapeHtml(s.teamName)} is ${escapeHtml(s.oppRecord)} this season — a rebuilding roster may be more open to a deal like this.`);
+        }
         return `<div class="suggestion-card">
           <div class="suggestion-body">
-            <div class="trade-suggestion-team">vs ${escapeHtml(s.teamName)}</div>
+            <div class="trade-suggestion-team">vs ${escapeHtml(s.teamName)} (${escapeHtml(s.oppRecord)})</div>
             <div class="trade-suggestion-swap">
               <div><span class="sit">You give</span> ${escapeHtml(s.giveInfo.n)} (${escapeHtml(s.giveInfo.p)}${s.giveInfo.t ? " · " + escapeHtml(s.giveInfo.t) : ""}, ${s.giveValue.toLocaleString()})</div>
               <div><span class="start">You get</span> ${escapeHtml(s.getInfo.n)} (${escapeHtml(s.getInfo.p)}${s.getInfo.t ? " · " + escapeHtml(s.getInfo.t) : ""}, ${s.getValue.toLocaleString()})</div>
             </div>
             <div class="trade-suggestion-edge">+${s.edge.toLocaleString()} value in your favor (${Math.round(s.edgePct * 100)}%)</div>
-            <div class="suggestion-reason">${reason}</div>
+            ${reasons.map((r) => `<div class="suggestion-reason">${r}</div>`).join("")}
             <button class="trade-suggestion-load" data-idx="${idx}">Load into builder</button>
           </div>
         </div>`;

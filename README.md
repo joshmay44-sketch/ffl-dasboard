@@ -77,11 +77,18 @@ Six tabs, each its own screen (no more everything stacked on one page):
   needs), receive at a position you're actually thin at, and only surface it
   when the FantasyCalc value math nets out in your favor — this tool exists to
   find offers worth sending, not to do neutral analysis, so an even or
-  losing trade never appears. Suggestions that also fill a real need for the
-  other team (not just yours) are ranked first, since those are the ones an
-  opposing manager is most likely to actually accept. Each card can load
-  straight into the manual builder below to review or tweak before deciding
-  whether to actually propose it in Sleeper.
+  losing trade never appears. Every candidate is also compared on
+  rest-of-season projection (the same model used everywhere else), not just
+  market value — a suggestion notes when the projection backs up the trade
+  value too versus when it's mostly a value/buy-low play with the numbers
+  currently pointing the other way, so that's visible rather than hidden.
+  Ranking prioritizes, in order: suggestions that also fill a real need for
+  the other team (not just yours, since those are the ones an opposing
+  manager is most likely to actually accept), then offers against a team
+  with a losing record (more realistically open to shaking up their roster
+  than one that's undefeated), then the combined value + projection edge.
+  Each card can load straight into the manual builder below to review or
+  tweak before deciding whether to actually propose it in Sleeper.
 
 An injury alert banner (Q/D/O/IR starters) shows above the tabs on every screen.
 First launch asks you to pick which team is yours from the league member list;
