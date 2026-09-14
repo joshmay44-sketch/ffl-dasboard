@@ -57,6 +57,7 @@
     lastSeasonPerf: {},
     scoreStdDev: null,
     scoreStdDevSource: null,
+    waiverPosFilter: "ALL",
   };
   const DEFAULT_SCORE_STDDEV = 22; // points — typical weekly fantasy lineup volatility, used only until real season data exists
 
@@ -66,11 +67,6 @@
   const DVP_CACHE_PREFIX = "ffl_dvp_v8_"; // bumped: added rostered-players-only custom-scoring match diagnostic
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
-  // Streaming-relevant positions: for these, Sleeper's precomputed point fields
-  // use its own standard scoring for points-allowed/FG-distance brackets, which
-  // may not exactly match a league's custom bracket values — lower confidence
-  // than the skill-position numbers above.
-  const STREAM_POSITIONS = ["DEF", "K"];
   const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
   // Per-week decay applied when averaging a range of real games (see
   // computeDVPForRange): 0.93 gives roughly a 9-10 week half-life, so a full
@@ -1187,121 +1183,84 @@
   }
   const WAIVER_UPGRADE_MARGIN = 2; // pts — ignore noise-level differences
 
-  function renderWaiver() {
+  // Unified available-players browser: every unrostered player, optionally
+  // filtered to one position, always ranked by the full projection engine —
+  // not limited to Sleeper's "trending" feed. Replaces the old split between a
+  // trending-only skill-position list and a separate DEF/K-only exhaustive
+  // section, which could show conflicting "best pick" signals on one screen
+  // (a trending-but-mediocre player up top while a better, non-trending option
+  // only showed up in the DEF/K section below).
+  function renderAvailablePlayers() {
     const wrap = el("waiver-list");
     const roster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
-    if (!roster) {
-      wrap.innerHTML = "";
-      return;
-    }
-    if (!DATA.trending.length) {
-      wrap.innerHTML = `<div class="empty-state">No trending waiver data available right now.</div>`;
-      return;
-    }
+    const filter = DATA.waiverPosFilter || "ALL";
 
     const takenIds = new Set();
     DATA.rosters.forEach((r) => (r.players || []).forEach((pid) => takenIds.add(pid)));
-    const thinPositions = computeThinPositions(roster);
-    const floor = rosterFloorByPosition(roster);
-    const totalSlots = (DATA.league.roster_positions || []).filter((s) => s !== "IR" && s !== "TAXI").length;
-    const rosterFull = (roster.players || []).length >= totalSlots;
+    const thinPositions = roster ? computeThinPositions(roster) : [];
+    const floor = roster ? rosterFloorByPosition(roster) : {};
+    const trendingCounts = {};
+    (DATA.trending || []).forEach((t) => { trendingCounts[t.player_id] = t.count; });
 
-    const available = DATA.trending
-      .filter((t) => !takenIds.has(t.player_id))
-      .map((t) => ({ ...t, info: DATA.players[t.player_id] }))
-      .filter((t) => t.info);
-
-    const withProjections = (list) =>
-      list
-        .map((t) => {
-          const proj = projectPoints(t.player_id);
-          const f = floor[t.info.p];
-          const isThin = thinPositions.includes(t.info.p);
-          const beatsFloor = !!(f && proj !== null && proj > f.proj + WAIVER_UPGRADE_MARGIN);
-          return { ...t, proj, isThin, beatsFloor, floorEntry: f };
-        })
-        .sort((a, b) => (b.proj ?? -1) - (a.proj ?? -1));
-
-    const annotated = withProjections(available);
-    const relevant = annotated.filter((t) => t.isThin || t.beatsFloor);
-    const shown = (relevant.length ? relevant : annotated).slice(0, 10);
+    let pool = Object.entries(DATA.players)
+      .filter(([pid, p]) => p && p.p && DVP_POSITIONS.includes(p.p) && !takenIds.has(pid))
+      .map(([pid, p]) => ({ pid, info: p, proj: projectPoints(pid) }))
+      .filter((x) => x.proj !== null);
+    if (filter !== "ALL") pool = pool.filter((x) => x.info.p === filter);
+    pool.sort((a, b) => b.proj - a.proj);
+    const shown = pool.slice(0, 30);
 
     if (!shown.length) {
-      wrap.innerHTML = `<div class="empty-state">No trending waiver targets available right now.</div>`;
+      wrap.innerHTML = `<div class="empty-state">No available players${filter !== "ALL" ? ` at ${escapeHtml(filter)}` : ""} right now.</div>`;
       return;
     }
 
-    const note = relevant.length
-      ? `Flags trending adds that fill a thin spot${thinPositions.length ? ` (${thinPositions.join(", ")})` : ""} or would outscore your current weakest player at that position — ranked by projected points`
-      : `No trending adds beat your current roster right now — showing top adds league-wide, ranked by projected points`;
+    const totalSlots = roster ? (DATA.league.roster_positions || []).filter((s) => s !== "IR" && s !== "TAXI").length : null;
+    const rosterFull = roster ? (roster.players || []).length >= totalSlots : false;
+    const note = `Every available player${filter !== "ALL" ? ` at ${escapeHtml(filter)}` : ""}, ranked by projected points`;
 
     wrap.innerHTML =
-      `<div class="waiver-note">${escapeHtml(note)}${rosterFull ? " · your roster is full, this would require a drop" : ""}</div>` +
+      `<div class="waiver-note">${note}${rosterFull ? " · your roster is full, this would require a drop" : ""}</div>` +
       shown
-        .map((t) => {
-          const p = t.info;
+        .map((x) => {
+          const p = x.info;
+          const f = floor[p.p];
+          const isThin = thinPositions.includes(p.p);
+          const beatsFloor = !!(f && x.proj > f.proj + WAIVER_UPGRADE_MARGIN);
           let reason = "";
-          if (t.isThin && t.beatsFloor && t.floorEntry) {
-            reason = `Fills a thin spot, and beats ${escapeHtml(t.floorEntry.name)} (${fmtPts(t.floorEntry.proj)})`;
-          } else if (t.isThin) {
+          if (isThin && beatsFloor && f) {
+            reason = `Fills a thin spot, and beats ${escapeHtml(f.name)} (${fmtPts(f.proj)})`;
+          } else if (isThin) {
             reason = `Fills a thin spot at ${escapeHtml(p.p || "")}`;
-          } else if (t.beatsFloor && t.floorEntry) {
-            reason = `Would beat ${escapeHtml(t.floorEntry.name)}, your weakest ${escapeHtml(p.p || "")} (${fmtPts(t.floorEntry.proj)})`;
+          } else if (beatsFloor && f) {
+            reason = `Would beat ${escapeHtml(f.name)}, your weakest ${escapeHtml(p.p || "")} (${fmtPts(f.proj)})`;
           }
+          const opp = opponentInfoFor(x.pid);
+          const oppText = opp ? `vs ${opp.opponent}${opp.opponentRecord ? ` (${opp.opponentRecord})` : ""}` : "";
+          const trendCount = trendingCounts[x.pid];
           return `<div class="player-card">
             <div class="player-slot">${escapeHtml(p.p || "")}</div>
             <div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>
             <div class="player-info">
               <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
-              <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""} · added in ${t.count} leagues today</div>
+              <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}${oppText ? " · " + escapeHtml(oppText) : ""}${trendCount ? ` · added in ${trendCount} leagues today` : ""}</div>
               ${reason ? `<div class="player-meta">${reason}</div>` : ""}
             </div>
-            <div class="player-points">${t.proj !== null ? fmtPts(t.proj) : "—"}</div>
+            <div class="player-points">${fmtPts(x.proj)}</div>
           </div>`;
         })
         .join("");
   }
 
-  function renderStreamers() {
-    const defWrap = el("streamer-def-list");
-    const kWrap = el("streamer-k-list");
-    if (!defWrap || !kWrap) return;
-
-    const takenIds = new Set();
-    DATA.rosters.forEach((r) => (r.players || []).forEach((pid) => takenIds.add(pid)));
-
-    function topAvailable(position) {
-      return Object.entries(DATA.players)
-        .filter(([pid, p]) => p.p === position && !takenIds.has(pid))
-        .map(([pid, p]) => ({ pid, info: p, proj: projectPoints(pid) }))
-        .filter((x) => x.proj !== null)
-        .sort((a, b) => b.proj - a.proj)
-        .slice(0, 5);
-    }
-
-    function row(x) {
-      const p = x.info;
-      const opp = opponentInfoFor(x.pid);
-      const oppText = opp ? `vs ${opp.opponent}${opp.opponentRecord ? ` (${opp.opponentRecord})` : ""}` : "opponent unknown";
-      return `<div class="player-card">
-        <div class="player-slot">${escapeHtml(p.p)}</div>
-        <div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>
-        <div class="player-info">
-          <div class="player-name-row"><span class="player-name">${escapeHtml(p.n)}</span>${injuryBadge(p.i)}</div>
-          <div class="player-meta">${escapeHtml(oppText)}</div>
-        </div>
-        <div class="player-points">${fmtPts(x.proj)}</div>
-      </div>`;
-    }
-
-    const defs = topAvailable("DEF");
-    const ks = topAvailable("K");
-    defWrap.innerHTML =
-      `<div class="waiver-note">Top available defenses this week</div>` +
-      (defs.length ? defs.map(row).join("") : `<div class="empty-state">No defense projections available right now.</div>`);
-    kWrap.innerHTML =
-      `<div class="waiver-note">Top available kickers this week</div>` +
-      (ks.length ? ks.map(row).join("") : `<div class="empty-state">No kicker projections available right now.</div>`);
+  function initWaiverFilter() {
+    document.querySelectorAll(".pos-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".pos-chip").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        DATA.waiverPosFilter = btn.getAttribute("data-pos");
+        renderAvailablePlayers();
+      });
+    });
   }
 
   function tradePlayerRowHtml(playerId, side) {
@@ -1431,8 +1390,7 @@
     renderMyTeam();
     renderInjuryBanner();
     renderStartSit();
-    renderWaiver();
-    renderStreamers();
+    renderAvailablePlayers();
   }
 
   function renderOwnerPicker() {
@@ -1559,6 +1517,7 @@
     initSettings();
     initTrade();
     initMatchupDetail();
+    initWaiverFilter();
     refreshCycle();
     setInterval(refreshCycle, REFRESH_MS);
     document.addEventListener("visibilitychange", () => {

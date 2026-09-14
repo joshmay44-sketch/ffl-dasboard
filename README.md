@@ -56,15 +56,18 @@ Six tabs, each its own screen (no more everything stacked on one page):
   back counts a little less (roughly a 9-10 week half-life) — so a player's
   current role carries more weight than what they did at the start of a season
   that may have looked very different.
-- **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
-  on any roster in your league. A player is surfaced if they fill a thin roster
-  spot **or** project (via the same engine above) to outscore your current
-  weakest rostered player at that position — a real upgrade check, not just a
-  numeric slot count — with the reason spelled out on each card. Also includes a
-  **Defense & Kicker Streamers** section: every available DEF/K ranked purely by
-  this week's matchup (not roster need), for weekly streaming, using the same
-  league-accurate custom scoring. Informational only — Sleeper's API is read-only,
-  so there's no in-app "add" button.
+- **Waivers** — a single, position-filterable browser (All/QB/RB/WR/TE/K/DEF, like
+  Sleeper's own Available Players screen) of every unrostered player in the
+  league, ranked by the same projection engine used everywhere else — not
+  limited to Sleeper's "trending" feed the way an earlier version was. A card
+  is flagged when it fills a thin roster spot **or** projects to outscore your
+  current weakest rostered player at that position — a real upgrade check, not
+  just a numeric slot count. (An earlier design split this into a trending-only
+  skill-position list plus a separate exhaustive DEF/K section, which could show
+  two different "best pick" signals on one screen when a trending player wasn't
+  actually the top-projected option — the unified browser removes that
+  contradiction entirely.) Informational only — Sleeper's API is read-only, so
+  there's no in-app "add" button.
 - **Trade Check** — pick players on each side of a proposed trade and compare total
   market value, pulled from **FantasyCalc** (a community trade-value tool keyed
   directly off Sleeper player IDs) — a genuinely different data source than Sleeper.

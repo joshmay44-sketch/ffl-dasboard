@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0e1a" />
   <title>Fantasy Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏈</text></svg>" />
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
   <div id="app">
@@ -75,13 +75,17 @@
       </section>
 
       <section id="view-waiver" class="view" hidden>
-        <p class="section-note">Sleeper's trending adds (last 24h), filtered to players not already rostered in your league. Flags anyone who fills a thin roster spot or projects to outscore your current weakest player at that position — not just numeric "need." Ranked by the same projection model used in Start/Sit. Informational only — Sleeper's API is read-only, so make the actual claim in the Sleeper app.</p>
+        <p class="section-note">Every available (unrostered) player, ranked by the same projection model used in Start/Sit — filter by position like Sleeper's own Available Players screen, or leave on All to browse everything at once. A card is flagged when it fills a thin roster spot or would outscore your current weakest player there. Informational only — Sleeper's API is read-only, so make the actual claim in the Sleeper app.</p>
+        <div class="pos-filter-strip">
+          <button class="pos-chip active" data-pos="ALL">All</button>
+          <button class="pos-chip" data-pos="QB">QB</button>
+          <button class="pos-chip" data-pos="RB">RB</button>
+          <button class="pos-chip" data-pos="WR">WR</button>
+          <button class="pos-chip" data-pos="TE">TE</button>
+          <button class="pos-chip" data-pos="K">K</button>
+          <button class="pos-chip" data-pos="DEF">DEF</button>
+        </div>
         <div id="waiver-list" class="stack"></div>
-
-        <h2 class="section-heading">Defense &amp; Kicker Streamers</h2>
-        <p class="section-note">Every available (unrostered) DEF/K ranked by this week's matchup, regardless of your roster needs — built for weekly streaming, not season-long adds. Projections are computed from raw box-score stats against your league's actual custom scoring settings (points-allowed and FG-distance brackets included), not a generic preset.</p>
-        <div id="streamer-def-list" class="stack"></div>
-        <div id="streamer-k-list" class="stack" style="margin-top:10px"></div>
       </section>
 
       <section id="view-trade" class="view" hidden>
@@ -159,6 +163,6 @@
     </div>
   </dialog>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
