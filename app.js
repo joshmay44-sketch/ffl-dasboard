@@ -518,6 +518,69 @@
     </div>`;
   }
 
+  // Same as playerCardHtml but shows live points AND the projection side by
+  // side, for the matchup drill-down modal — the whole point is seeing how the
+  // team total is actually built up, not just the final number.
+  function matchupPlayerRowHtml(playerId, slotLabel, matchup, idx) {
+    if (!playerId || playerId === "0") {
+      return `<div class="player-card">
+        <div class="player-slot">${escapeHtml(slotLabel || "")}</div>
+        <div class="player-info"><div class="player-name" style="color:var(--text-dim)">Empty</div></div>
+      </div>`;
+    }
+    const p = DATA.players[playerId] || { n: playerId, p: "", t: "", i: null };
+    const live = ptsFor(matchup, playerId, idx);
+    const proj = projectPoints(playerId);
+    const img =
+      p.p === "DEF"
+        ? ""
+        : `<img class="player-avatar" alt="" loading="lazy" src="https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg" onerror="this.style.visibility='hidden'" />`;
+    return `<div class="player-card">
+      <div class="player-slot">${escapeHtml(slotLabel || p.p || "")}</div>
+      ${img || `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">${escapeHtml(p.t || "")}</div>`}
+      <div class="player-info">
+        <div class="player-name-row">
+          <span class="player-name">${escapeHtml(p.n)}</span>
+          ${injuryBadge(p.i)}
+        </div>
+        <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
+      </div>
+      <div class="matchup-detail-stats">
+        <div class="matchup-detail-stat"><span class="matchup-detail-stat-label">Live</span><span class="matchup-detail-stat-value">${fmtPts(live)}</span></div>
+        <div class="matchup-detail-stat"><span class="matchup-detail-stat-label">Proj</span><span class="matchup-detail-stat-value">${fmtPts(proj)}</span></div>
+      </div>
+    </div>`;
+  }
+
+  function openMatchupDetail(matchupId) {
+    const group = DATA.matchups.filter((m) => String(m.matchup_id) === String(matchupId));
+    if (group.length < 2) return;
+    const [a, b] = group;
+    const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
+    const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
+    const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
+
+    function renderSide(roster, matchup, nameEl, listEl, totalEl) {
+      nameEl.textContent = roster ? teamNameFor(roster.owner_id) : "Team";
+      const starters = roster ? roster.starters || [] : [];
+      listEl.innerHTML =
+        starters.map((pid, idx) => matchupPlayerRowHtml(pid, slotOrder[idx] || "", matchup, idx)).join("") ||
+        `<div class="empty-state">No starters set.</div>`;
+      totalEl.textContent = `Total: ${fmtPts(roster ? teamLiveAdjustedTotal(roster) : 0)}`;
+    }
+    renderSide(rosterA, a, el("matchup-detail-name-a"), el("matchup-detail-list-a"), el("matchup-detail-total-a"));
+    renderSide(rosterB, b, el("matchup-detail-name-b"), el("matchup-detail-list-b"), el("matchup-detail-total-b"));
+    el("matchup-detail-title").textContent = `Week ${DATA.week} Matchup`;
+    el("matchup-detail-modal").showModal();
+  }
+
+  function initMatchupDetail() {
+    el("matchup-detail-close").addEventListener("click", () => el("matchup-detail-modal").close());
+    el("matchup-detail-modal").addEventListener("click", (e) => {
+      if (e.target === el("matchup-detail-modal")) el("matchup-detail-modal").close();
+    });
+  }
+
   function renderTopbar() {
     const lg = DATA.league;
     if (!lg) return;
@@ -599,9 +662,13 @@
             <div class="matchup-score${winning ? " winning" : ""}">${(m.points || 0).toFixed(2)}</div>
           </div>`;
         });
-        return `<div class="matchup-card">${rows[0]}<div class="matchup-divider"></div>${rows[1]}</div>`;
+        return `<div class="matchup-card clickable" data-matchup-id="${escapeHtml(String(a.matchup_id))}">${rows[0]}<div class="matchup-divider"></div>${rows[1]}<div class="matchup-tap-hint">Tap for player-by-player breakdown</div></div>`;
       })
       .join("");
+
+    document.querySelectorAll("#matchups-list .matchup-card[data-matchup-id]").forEach((card) => {
+      card.addEventListener("click", () => openMatchupDetail(card.getAttribute("data-matchup-id")));
+    });
   }
 
   function renderStandings() {
@@ -1225,6 +1292,7 @@
     initTabs();
     initSettings();
     initTrade();
+    initMatchupDetail();
     refreshCycle();
     setInterval(refreshCycle, REFRESH_MS);
     document.addEventListener("visibilitychange", () => {
