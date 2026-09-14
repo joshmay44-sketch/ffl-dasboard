@@ -135,6 +135,7 @@ html, body {
   margin: -4px 4px 8px;
   line-height: 1.4;
 }
+.section-note a { color: var(--accent-2); font-weight: 700; }
 
 main { flex: 1; padding: 10px 16px 24px; }
 
