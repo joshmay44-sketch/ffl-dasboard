@@ -18,7 +18,11 @@ Six tabs, each its own screen (no more everything stacked on one page):
   engine as Start/Sit), independent of actual win-loss record — a strength ranking,
   not the standings.
 - **Standings** — full league standings (record, points for/against)
-- **My Team** — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.)
+- **My Team** — your starters + bench + IR, with injury badges (Q/D/O/IR/etc.),
+  each row showing live points *and* a projection side by side (the same model
+  used everywhere else) so a bench player can be gut-checked against your
+  starters without switching tabs. The header also shows this week's live
+  score and win % against your actual opponent, same math as Matchups.
 - **Start/Sit** — flags a bench player as a likely upgrade using each player's own
   scoring history (this season's games once they exist, otherwise that exact
   player's own last-season average — not a generic position average, which would

@@ -647,6 +647,7 @@
     }
     const p = DATA.players[playerId] || { n: playerId, p: "", t: "", i: null };
     const pts = ptsFor(matchup, playerId, idx);
+    const proj = projectPoints(playerId);
     const img =
       p.p === "DEF"
         ? ""
@@ -661,7 +662,7 @@
         </div>
         <div class="player-meta">${escapeHtml(p.p || "")}${p.t ? " · " + escapeHtml(p.t) : ""}</div>
       </div>
-      <div class="player-points">${fmtPts(pts)}</div>
+      <div class="player-points">${fmtPts(pts)}<span class="slot-side-proj">proj ${fmtPts(proj)}</span></div>
     </div>`;
   }
 
@@ -918,12 +919,33 @@
     const user = userFor(roster.owner_id);
     const name = teamNameFor(roster.owner_id);
     const av = user ? avatarUrl(user.avatar) : "";
+
+    // Same live-score/win% math as the Matchups tab, surfaced here too so a
+    // health-check doesn't require switching tabs — only shown when this
+    // week's matchup pairing is actually known.
+    let summaryHtml = "";
+    const myMatchup = matchupFor(roster.roster_id);
+    if (myMatchup && myMatchup.matchup_id != null) {
+      const oppEntry = DATA.matchups.find(
+        (m) => String(m.matchup_id) === String(myMatchup.matchup_id) && m.roster_id !== roster.roster_id
+      );
+      const oppRoster = oppEntry ? DATA.rosters.find((r) => r.roster_id === oppEntry.roster_id) : null;
+      const projMe = teamLiveAdjustedTotal(roster);
+      const projOpp = oppRoster ? teamLiveAdjustedTotal(oppRoster) : null;
+      const prob = projOpp !== null ? winProbability(projMe, projOpp) : null;
+      summaryHtml = `<div class="myteam-summary">
+        <div class="myteam-summary-pts">${fmtPts(projMe)}</div>
+        <div class="myteam-summary-meta">${prob !== null ? `${Math.round(prob * 100)}% to win` : "proj"}</div>
+      </div>`;
+    }
+
     el("myteam-header").innerHTML = `
       ${av ? `<img alt="" src="${av}" />` : ""}
       <div>
         <div class="myteam-title">${escapeHtml(name)}</div>
         <div class="myteam-record">${roster.settings.wins || 0}-${roster.settings.losses || 0}${roster.settings.ties ? "-" + roster.settings.ties : ""}</div>
-      </div>`;
+      </div>
+      ${summaryHtml}`;
 
     const matchup = matchupFor(roster.roster_id);
     const slotOrder = (DATA.league.roster_positions || []).filter((s) => s !== "BN" && s !== "IR" && s !== "TAXI");
