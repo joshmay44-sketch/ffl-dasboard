@@ -9,7 +9,12 @@ module.exports = async (req, res) => {
   const numTeams = /^\d{1,2}$/.test(req.query.numTeams) ? req.query.numTeams : "12";
   const ppr = /^(0|0\.5|1)$/.test(req.query.ppr) ? req.query.ppr : "1";
 
-  const url = `https://api.fantasycalc.com/values/current?isDynasty=${isDynasty}&numQBs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`;
+  // FantasyCalc's own current API docs (fantasycalc.com/api-docs) confirm the
+  // required parameter is spelled "numQbs" (lowercase b) — this was
+  // previously sent as "numQBs", which FantasyCalc's server apparently
+  // treats as the required param being absent entirely, manifesting as a
+  // 404 rather than a more conventional 400 on a missing required field.
+  const url = `https://api.fantasycalc.com/values/current?isDynasty=${isDynasty}&numQbs=${numQbs}&numTeams=${numTeams}&ppr=${ppr}`;
 
   try {
     const controller = new AbortController();
