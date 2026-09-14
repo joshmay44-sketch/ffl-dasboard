@@ -24,6 +24,15 @@
   const RECENT_WEEKS_BACK = 3;
   const START_SIT_MARGIN = 2; // points of edge before flagging a bench upgrade
   const INJURY_FLAGS = ["Questionable", "Doubtful", "Out", "IR", "Suspended", "Sus", "PUP"];
+  // Statuses Sleeper itself treats as a near-certain zero (inactive/ruled out) —
+  // their projection is zeroed, not just discounted, since there's no real chance
+  // of the outcome landing anywhere near a normal game.
+  const INJURY_OUT_FLAGS = ["Out", "IR", "Suspended", "Sus", "PUP"];
+  // Statuses where the player might genuinely still play — a real but uncertain
+  // risk, applied as a percentage discount to their own projection rather than an
+  // automatic bench swap, so a still-elite Questionable starter isn't reflexively
+  // pulled for a much weaker healthy bench option.
+  const INJURY_RISK_DISCOUNT = { Questionable: 0.85, Doubtful: 0.5 };
 
   const DATA = {
     league: null,
@@ -482,6 +491,17 @@
   // field, which understates anyone who's actually a real starter. Only a player
   // with no track record at all (true rookie, first game ever) falls back to the
   // pure position average, since that's the only real signal available for them.
+  // This week's real downside risk from Sleeper's own injury designation — never
+  // applied to the historical averages themselves (DATA.recentPerf/lastSeasonPerf
+  // stay untouched raw box-score data, so future weeks aren't corrupted by a
+  // status that's since cleared), only to this week's forward-looking number.
+  function injuryDiscountFactor(status) {
+    if (!status) return 1;
+    if (INJURY_OUT_FLAGS.includes(status)) return 0;
+    if (INJURY_RISK_DISCOUNT.hasOwnProperty(status)) return INJURY_RISK_DISCOUNT[status];
+    return 1;
+  }
+
   function projectPoints(playerId) {
     const p = DATA.players[playerId];
     if (!p) return null;
@@ -490,10 +510,12 @@
     const personalAvg = recentAvg !== null ? recentAvg : lastSeasonAvg;
     const oppInfo = opponentInfoFor(playerId);
     const dvpAvg = oppInfo && DATA.dvp[oppInfo.opponent] ? DATA.dvp[oppInfo.opponent][p.p] : undefined;
-    if (personalAvg !== null && dvpAvg !== undefined) return personalAvg * PROJECTION_BLEND + dvpAvg * (1 - PROJECTION_BLEND);
-    if (personalAvg !== null) return personalAvg;
-    if (dvpAvg !== undefined) return dvpAvg;
-    return null;
+    let base;
+    if (personalAvg !== null && dvpAvg !== undefined) base = personalAvg * PROJECTION_BLEND + dvpAvg * (1 - PROJECTION_BLEND);
+    else if (personalAvg !== null) base = personalAvg;
+    else if (dvpAvg !== undefined) base = dvpAvg;
+    else return null;
+    return base * injuryDiscountFactor(p.i);
   }
 
   function leagueTradeParams() {
@@ -959,10 +981,14 @@
     }
 
     const passes = [
-      slots.filter((s) => INJURY_FLAGS.includes(s.info.i)),
+      slots.filter((s) => INJURY_OUT_FLAGS.includes(s.info.i)),
+      slots.filter((s) => INJURY_RISK_DISCOUNT.hasOwnProperty(s.info.i)),
       slots.filter((s) => !INJURY_FLAGS.includes(s.info.i)),
     ];
 
+    // Tier 1: ruled out (or as good as) — Sleeper itself expects zero snaps
+    // (projectPoints already zeroes their number), so always swap to the best
+    // available bench option regardless of relative projection.
     passes[0].forEach((s) => {
       const eligible = flexEligibility(s.slot);
       if (!eligible.length) return;
@@ -977,10 +1003,13 @@
       const chosen = best !== null ? best : pool[0];
       const chosenProj = best !== null ? bestProj : projectPoints(pool[0]);
       usedBench.add(chosen);
-      suggestions.push({ starterPid: s.pid, starterAvg: projectPoints(s.pid), benchPid: chosen, benchAvg: chosenProj, reason: "injury", slot: s.slot });
+      suggestions.push({ starterPid: s.pid, starterAvg: projectPoints(s.pid), benchPid: chosen, benchAvg: chosenProj, reason: "out", slot: s.slot });
     });
 
-    passes[1].forEach((s) => {
+    // Tiers 2 and 3 share the same comparison logic — a real margin between the
+    // starter's own (already risk-discounted, for tier 2) projection and the best
+    // bench option — just with a different label for why the starter's flagged.
+    function suggestIfBenchBeats(s, reason) {
       const eligible = flexEligibility(s.slot);
       if (!eligible.length) return;
       const starterProj = projectPoints(s.pid);
@@ -993,9 +1022,16 @@
       const { best, bestProj } = bestCandidate(candidates);
       if (best !== null && bestProj - starterProj >= START_SIT_MARGIN) {
         usedBench.add(best);
-        suggestions.push({ starterPid: s.pid, starterAvg: starterProj, benchPid: best, benchAvg: bestProj, reason: "performance", slot: s.slot });
+        suggestions.push({ starterPid: s.pid, starterAvg: starterProj, benchPid: best, benchAvg: bestProj, reason, slot: s.slot });
       }
-    });
+    }
+
+    // Tier 2: real but uncertain risk (Questionable/Doubtful) — the starter's own
+    // projection already carries the risk discount, so a swap is only flagged if
+    // a bench option clears that discounted number by a real margin.
+    passes[1].forEach((s) => suggestIfBenchBeats(s, "risk"));
+    // Tier 3: healthy — pure performance comparison.
+    passes[2].forEach((s) => suggestIfBenchBeats(s, "performance"));
 
     if (!suggestions.length) {
       wrap.innerHTML = `<div class="empty-state">No changes suggested — your lineup looks solid based on projected points and health.</div>`;
@@ -1007,12 +1043,16 @@
         const sp = DATA.players[s.starterPid] || { n: s.starterPid };
         const bp = DATA.players[s.benchPid] || { n: s.benchPid };
         let reasonText;
-        if (s.reason === "injury") {
+        if (s.reason === "out") {
           const code = INJURY_CODES[sp.i] || sp.i;
           reasonText =
             s.benchAvg !== null
               ? `${sp.n} is ${code} — ${bp.n} projects for ${fmtPts(s.benchAvg)} pts`
               : `${sp.n} is ${code} — ${bp.n} may be the safer play`;
+        } else if (s.reason === "risk") {
+          const code = INJURY_CODES[sp.i] || sp.i;
+          const riskPct = Math.round((1 - injuryDiscountFactor(sp.i)) * 100);
+          reasonText = `${sp.n} is ${code} (${riskPct}% risk discount, now ${fmtPts(s.starterAvg)}) — ${bp.n} projects higher (${fmtPts(s.benchAvg)})`;
         } else {
           reasonText = `${bp.n} projects higher than ${sp.n} (${fmtPts(s.benchAvg)} vs ${fmtPts(s.starterAvg)})`;
         }

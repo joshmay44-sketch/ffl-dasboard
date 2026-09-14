@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0e1a" />
   <title>Fantasy Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏈</text></svg>" />
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -69,7 +69,7 @@
       </section>
 
       <section id="view-startsit" class="view" hidden>
-        <p class="section-note">Flags a bench player as a likely upgrade using a projection blending each player's own scoring history — this season's games once they exist, or that exact player's own last-season average before then — with a defense-vs-position model built from real box scores. Only a player with zero track record anywhere (a true rookie) falls back to a generic position average. No expert rankings or opinions involved.</p>
+        <p class="section-note">Flags a bench player as a likely upgrade using a projection blending each player's own scoring history — this season's games once they exist, or that exact player's own last-season average before then — with a defense-vs-position model built from real box scores. Only a player with zero track record anywhere (a true rookie) falls back to a generic position average. A starter's own injury designation also adjusts their number: Questionable/Doubtful applies a real risk discount (15%/50%) rather than an automatic swap, and Out/IR/Suspended zeroes it, since Sleeper itself expects zero snaps. No expert rankings or opinions involved.</p>
         <div id="matchup-diff-status" class="waiver-note" hidden></div>
         <div id="startsit-list" class="stack"></div>
       </section>
@@ -155,6 +155,6 @@
     </div>
   </dialog>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

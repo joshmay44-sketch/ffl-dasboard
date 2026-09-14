@@ -31,7 +31,13 @@ Six tabs, each its own screen (no more everything stacked on one page):
   brackets, etc.) your league has configured. The Start/Sit status line reports
   how much of the available stat data actually matched your league's scoring keys
   (e.g. "offense custom-scoring matched 340/360"), so the coverage is verifiable
-  rather than just asserted.
+  rather than just asserted. Every projection also factors in that week's real
+  matchup (opponent defense-vs-position, above) and Sleeper's own injury
+  designation for the player: Questionable/Doubtful applies a genuine risk
+  discount (15%/50%) to their own number rather than an automatic bench swap —
+  so a still-elite Questionable starter isn't reflexively pulled for a much
+  weaker healthy option — while Out/IR/Suspended/PUP zeroes the projection
+  outright, since Sleeper itself expects zero snaps.
 - **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
   on any roster in your league. A player is surfaced if they fill a thin roster
   spot **or** project (via the same engine above) to outscore your current
