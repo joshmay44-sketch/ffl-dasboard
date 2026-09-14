@@ -38,7 +38,13 @@ Six tabs, each its own screen (no more everything stacked on one page):
   brackets, etc.) your league has configured. The Start/Sit status line reports
   how much of the available stat data actually matched your league's scoring keys
   (e.g. "offense custom-scoring matched 340/360"), so the coverage is verifiable
-  rather than just asserted. Every projection also factors in that week's real
+  rather than just asserted. That leaguewide figure spans every NFL player at
+  these positions, most of whom are backups/inactives with no stats to match in
+  a given week, so a lower ratio there doesn't necessarily mean real production
+  is being missed — a second, narrower figure ("your rostered players' custom-
+  scoring matched X/Y") tracks only the players actually on rosters in your
+  league, which is the number that actually reflects projection reliability.
+  Every projection also factors in that week's real
   matchup (opponent defense-vs-position, above) and Sleeper's own injury
   designation for the player: Questionable/Doubtful applies a genuine risk
   discount (15%/50%) to their own number rather than an automatic bench swap —

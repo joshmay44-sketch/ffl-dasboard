@@ -63,7 +63,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v7_"; // bumped: personal/DVP averages are now recency-weighted, not a flat season average
+  const DVP_CACHE_PREFIX = "ffl_dvp_v8_"; // bumped: added rostered-players-only custom-scoring match diagnostic
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -397,6 +397,14 @@
     const scoringSettings = (DATA.league && DATA.league.scoring_settings) || {};
     const table = {}; // opponent team -> position -> { sum, n }
     const perPlayer = {}; // player_id -> { sum, n } — this specific player's own average that season
+    // The leaguewide match rate below spans every NFL player at these positions,
+    // most of whom are backups/inactives most weeks — a low overall rate can just
+    // mean "lots of zero-production players had no stat keys to match," not that
+    // real production is being missed. Tracking rostered-players-only separately
+    // gives a much more honest signal for whether THIS league's actual players
+    // (the ones projections are built from) are being custom-scored correctly.
+    const rosteredIds = new Set();
+    (DATA.rosters || []).forEach((r) => (r.players || []).forEach((pid) => rosteredIds.add(pid)));
     const weekResults = await Promise.all(
       weeks.map((w) => Promise.all([fetchWeekStats(season, w), fetchWeekSchedule(season, w)]))
     );
@@ -408,6 +416,8 @@
     let defCustomTotal = 0;
     let offCustomMatched = 0;
     let offCustomTotal = 0;
+    let rosteredMatched = 0;
+    let rosteredTotal = 0;
     for (let i = 0; i < weekResults.length; i++) {
       const [stats, schedule] = weekResults[i];
       if (!stats || !schedule) continue;
@@ -425,16 +435,23 @@
         if (!p || !p.t || !DVP_POSITIONS.includes(p.p)) continue;
         statLinesSeen++;
         let pts;
+        let matched;
         if (p.p === "DEF") {
           defCustomTotal++;
           const custom = customDefensePoints(stats[pid], scoringSettings);
-          if (custom.matched) defCustomMatched++;
+          matched = custom.matched;
+          if (matched) defCustomMatched++;
           pts = custom.points !== null ? custom.points : pointsFromStatLine(stats[pid], field);
         } else {
           offCustomTotal++;
           const custom = customPointsFromStatLine(stats[pid], scoringSettings);
-          if (custom.matched) offCustomMatched++;
+          matched = custom.matched;
+          if (matched) offCustomMatched++;
           pts = custom.points !== null ? custom.points : pointsFromStatLine(stats[pid], field);
+        }
+        if (rosteredIds.has(pid)) {
+          rosteredTotal++;
+          if (matched) rosteredMatched++;
         }
         if (pts === null) continue;
         statLinesUsable++;
@@ -459,7 +476,7 @@
     return {
       avg,
       perPlayer,
-      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field, defCustomMatched, defCustomTotal, offCustomMatched, offCustomTotal },
+      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field, defCustomMatched, defCustomTotal, offCustomMatched, offCustomTotal, rosteredMatched, rosteredTotal },
     };
   }
 
@@ -499,7 +516,10 @@
       const offNote = d.offCustomTotal
         ? `, offense custom-scoring matched ${d.offCustomMatched}/${d.offCustomTotal}`
         : "";
-      const source = `${sourceLabel} — ${d.weeksWithData}/${d.weeksAttempted} weeks of data, ${d.observations} player-games, field "${d.field}"${defNote}${offNote}`;
+      const rosteredNote = d.rosteredTotal
+        ? `, your rostered players' custom-scoring matched ${d.rosteredMatched}/${d.rosteredTotal}`
+        : "";
+      const source = `${sourceLabel} — ${d.weeksWithData}/${d.weeksAttempted} weeks of data, ${d.observations} player-games, field "${d.field}"${defNote}${offNote}${rosteredNote}`;
       const table = result.avg;
       if (!Object.keys(table).length) throw new Error("empty DVP table");
       DATA.dvp = table;
