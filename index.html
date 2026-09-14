@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0e1a" />
   <title>Fantasy Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏈</text></svg>" />
-  <link rel="stylesheet" href="style.css?v=16" />
+  <link rel="stylesheet" href="style.css?v=17" />
 </head>
 <body>
   <div id="app">
@@ -91,6 +91,12 @@
       <section id="view-trade" class="view" hidden>
         <p class="section-note">Player trade values from FantasyCalc, a community market-value tool that keys directly off Sleeper player IDs. Pick players on each side to compare total value.</p>
         <div id="trade-status" class="waiver-note" hidden></div>
+
+        <h2 class="section-heading">Suggested Trades</h2>
+        <p class="section-note">Scans every other roster for a 1-for-1 swap where you'd give from a position you have real bench surplus at and get someone at a position you're actually thin at — only shown when the FantasyCalc value math comes out in your favor. These are real numeric edges, not a guarantee the other manager says yes.</p>
+        <div id="trade-suggestions" class="stack"></div>
+
+        <h2 class="section-heading">Build Your Own</h2>
         <div class="trade-columns">
           <div class="trade-side">
             <div class="trade-side-label">You give</div>
@@ -163,6 +169,6 @@
     </div>
   </dialog>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

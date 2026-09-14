@@ -71,6 +71,17 @@ Six tabs, each its own screen (no more everything stacked on one page):
 - **Trade Check** — pick players on each side of a proposed trade and compare total
   market value, pulled from **FantasyCalc** (a community trade-value tool keyed
   directly off Sleeper player IDs) — a genuinely different data source than Sleeper.
+  Above the manual builder, **Suggested Trades** scans every other roster for a
+  real 1-for-1 opportunity: give from a position where you have genuine bench
+  surplus (at least 2 more players than your league's own starting requirement
+  needs), receive at a position you're actually thin at, and only surface it
+  when the FantasyCalc value math nets out in your favor — this tool exists to
+  find offers worth sending, not to do neutral analysis, so an even or
+  losing trade never appears. Suggestions that also fill a real need for the
+  other team (not just yours) are ranked first, since those are the ones an
+  opposing manager is most likely to actually accept. Each card can load
+  straight into the manual builder below to review or tweak before deciding
+  whether to actually propose it in Sleeper.
 
 An injury alert banner (Q/D/O/IR starters) shows above the tabs on every screen.
 First launch asks you to pick which team is yours from the league member list;

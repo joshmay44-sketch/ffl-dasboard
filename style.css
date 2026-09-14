@@ -282,6 +282,24 @@ main { flex: 1; padding: 10px 16px 24px; }
 .suggestion-swap .start { color: var(--accent-2); }
 .suggestion-reason { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
+.trade-suggestion-team { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 4px; }
+.trade-suggestion-swap { font-size: 14px; font-weight: 600; }
+.trade-suggestion-swap > div { margin-bottom: 2px; }
+.trade-suggestion-swap .sit { color: var(--text-dim); }
+.trade-suggestion-swap .start { color: var(--accent-2); }
+.trade-suggestion-edge { font-size: 12px; font-weight: 700; color: var(--accent-2); margin-top: 4px; }
+.trade-suggestion-load {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* Waiver wire */
 .waiver-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 2px; }
 

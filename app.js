@@ -67,6 +67,10 @@
   const DVP_CACHE_PREFIX = "ffl_dvp_v8_"; // bumped: added rostered-players-only custom-scoring match diagnostic
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
+  // Trade suggestions stick to skill positions — DEF/K rarely carry real
+  // trade value or get traded in practice, and FantasyCalc itself barely
+  // prices them.
+  const TRADE_POSITIONS = ["QB", "RB", "WR", "TE"];
   const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
   // Per-week decay applied when averaging a range of real games (see
   // computeDVPForRange): 0.93 gives roughly a 9-10 week half-life, so a full
@@ -587,6 +591,7 @@
           DATA.tradeValues = parsed.data;
           DATA.tradeValuesLoaded = true;
           renderTradeCheck();
+          renderTradeSuggestions();
           return;
         }
       }
@@ -615,6 +620,7 @@
       statusEl.textContent = `Trade values are unavailable right now (${e.message || "FantasyCalc lookup failed"}). Try again later.`;
     }
     renderTradeCheck();
+    renderTradeSuggestions();
   }
 
   function userFor(userId) {
@@ -1155,19 +1161,41 @@
       .join("");
   }
 
-  function computeThinPositions(roster) {
-    const counts = {};
-    (roster.players || []).forEach((pid) => {
-      const p = DATA.players[pid];
-      if (p && p.p) counts[p.p] = (counts[p.p] || 0) + 1;
-    });
+  // How many starting slots the league requires at each single-eligibility
+  // position (FLEX/SUPER_FLEX excluded — they don't pin a specific position).
+  // League-wide, not roster-specific, so computed once and reused for every
+  // team's surplus/need profile.
+  function requiredStartCounts() {
     const required = {};
     (DATA.league.roster_positions || []).forEach((s) => {
       if (s === "BN" || s === "IR" || s === "TAXI") return;
       const elig = flexEligibility(s);
       if (elig.length === 1) required[elig[0]] = (required[elig[0]] || 0) + 1;
     });
+    return required;
+  }
+  function positionCounts(roster) {
+    const counts = {};
+    (roster.players || []).forEach((pid) => {
+      const p = DATA.players[pid];
+      if (p && p.p) counts[p.p] = (counts[p.p] || 0) + 1;
+    });
+    return counts;
+  }
+  function computeThinPositions(roster) {
+    const counts = positionCounts(roster);
+    const required = requiredStartCounts();
     return Object.keys(required).filter((pos) => (counts[pos] || 0) <= required[pos]);
+  }
+  // Positions where a roster carries meaningfully more depth than its own
+  // starting requirement — at least 2 more than needed, real bench surplus
+  // rather than a normal 1-deep bench. These are the players realistically
+  // available to trade away without weakening the starting lineup.
+  const TRADE_SURPLUS_MARGIN = 2;
+  function computeSurplusPositions(roster) {
+    const counts = positionCounts(roster);
+    const required = requiredStartCounts();
+    return Object.keys(counts).filter((pos) => (counts[pos] || 0) >= (required[pos] || 0) + TRADE_SURPLUS_MARGIN);
   }
 
   // Your single weakest rostered player at each position, by projection — the
@@ -1263,6 +1291,127 @@
         btn.classList.add("active");
         DATA.waiverPosFilter = btn.getAttribute("data-pos");
         renderAvailablePlayers();
+      });
+    });
+  }
+
+  // Scans every other team for a 1-for-1 swap where you give from a position
+  // where you have real bench surplus and receive at a position you're thin
+  // at — kept only when the two players' FantasyCalc values net out in your
+  // favor. Deliberately one-sided: this tool exists to find offers worth
+  // actually sending, not to do neutral analysis, so a trade that's even or
+  // favors the other team never shows up here.
+  function computeTradeSuggestions() {
+    if (!DATA.tradeValuesLoaded || DATA.tradeValuesFailed) return [];
+    const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
+    if (!myRoster) return [];
+
+    const myNeeds = computeThinPositions(myRoster);
+    const mySurplus = computeSurplusPositions(myRoster);
+    const valueOf = (pid) => (DATA.tradeValues[pid] && DATA.tradeValues[pid].value) || null;
+
+    const giveCandidates = (myRoster.players || []).filter((pid) => {
+      const p = DATA.players[pid];
+      return p && TRADE_POSITIONS.includes(p.p) && mySurplus.includes(p.p) && valueOf(pid) !== null;
+    });
+    if (!giveCandidates.length) return [];
+
+    const suggestions = [];
+    DATA.rosters.forEach((roster) => {
+      if (roster.roster_id === myRoster.roster_id) return;
+      const theirNeeds = computeThinPositions(roster);
+      const theirSurplus = computeSurplusPositions(roster);
+      const teamName = teamNameFor(roster.owner_id);
+
+      const getCandidates = (roster.players || []).filter((pid) => {
+        const p = DATA.players[pid];
+        return p && TRADE_POSITIONS.includes(p.p) && myNeeds.includes(p.p) && theirSurplus.includes(p.p) && valueOf(pid) !== null;
+      });
+      if (!getCandidates.length) return;
+
+      giveCandidates.forEach((givePid) => {
+        const giveInfo = DATA.players[givePid];
+        const giveValue = valueOf(givePid);
+        getCandidates.forEach((getPid) => {
+          const getInfo = DATA.players[getPid];
+          const getValue = valueOf(getPid);
+          const edge = getValue - giveValue;
+          if (edge <= 0) return;
+          suggestions.push({
+            rosterId: roster.roster_id,
+            teamName,
+            givePid, giveInfo, giveValue,
+            getPid, getInfo, getValue,
+            edge,
+            edgePct: edge / giveValue,
+            mutualFit: theirNeeds.includes(giveInfo.p),
+          });
+        });
+      });
+    });
+
+    // Trades that also fill a real need for the other team are the ones they
+    // might actually accept — rank those first, then by your edge within
+    // each group. Keep each player — yours or theirs — in at most one
+    // suggestion; otherwise the same single valuable player on their roster
+    // could get "offered for" by three different players of yours at once,
+    // which isn't a real option since they can only complete one of those.
+    suggestions.sort((a, b) => (b.mutualFit - a.mutualFit) || b.edgePct - a.edgePct);
+    const seenGive = new Set();
+    const seenGet = new Set();
+    const deduped = [];
+    for (const s of suggestions) {
+      if (seenGive.has(s.givePid) || seenGet.has(s.getPid)) continue;
+      seenGive.add(s.givePid);
+      seenGet.add(s.getPid);
+      deduped.push(s);
+    }
+    return deduped.slice(0, 8);
+  }
+
+  function renderTradeSuggestions() {
+    const wrap = el("trade-suggestions");
+    if (!wrap) return;
+    if (!DATA.tradeValuesLoaded) {
+      wrap.innerHTML = "";
+      return;
+    }
+    if (DATA.tradeValuesFailed) {
+      wrap.innerHTML = `<div class="empty-state">Suggestions need real trade values, which failed to load — see the status above.</div>`;
+      return;
+    }
+    const suggestions = computeTradeSuggestions();
+    if (!suggestions.length) {
+      wrap.innerHTML = `<div class="empty-state">No trade currently favors you — either no other team has surplus at a position you need, or the value math doesn't come out ahead right now.</div>`;
+      return;
+    }
+    wrap.innerHTML = suggestions
+      .map((s, idx) => {
+        const reason = s.mutualFit
+          ? `You're thin at ${escapeHtml(s.getInfo.p)}; they're deep there but thin at ${escapeHtml(s.giveInfo.p)} — a real need fit for both sides.`
+          : `You're thin at ${escapeHtml(s.getInfo.p)} and they have surplus depth there, though it's less of a need for them — may take convincing.`;
+        return `<div class="suggestion-card">
+          <div class="suggestion-body">
+            <div class="trade-suggestion-team">vs ${escapeHtml(s.teamName)}</div>
+            <div class="trade-suggestion-swap">
+              <div><span class="sit">You give</span> ${escapeHtml(s.giveInfo.n)} (${escapeHtml(s.giveInfo.p)}${s.giveInfo.t ? " · " + escapeHtml(s.giveInfo.t) : ""}, ${s.giveValue.toLocaleString()})</div>
+              <div><span class="start">You get</span> ${escapeHtml(s.getInfo.n)} (${escapeHtml(s.getInfo.p)}${s.getInfo.t ? " · " + escapeHtml(s.getInfo.t) : ""}, ${s.getValue.toLocaleString()})</div>
+            </div>
+            <div class="trade-suggestion-edge">+${s.edge.toLocaleString()} value in your favor (${Math.round(s.edgePct * 100)}%)</div>
+            <div class="suggestion-reason">${reason}</div>
+            <button class="trade-suggestion-load" data-idx="${idx}">Load into builder</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+    wrap.querySelectorAll(".trade-suggestion-load").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const s = suggestions[Number(btn.getAttribute("data-idx"))];
+        if (!s) return;
+        DATA.trade.give = [s.givePid];
+        DATA.trade.get = [s.getPid];
+        renderTradeCheck();
+        el("trade-give-list").scrollIntoView({ behavior: "smooth", block: "start" });
       });
     });
   }
