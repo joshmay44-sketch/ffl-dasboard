@@ -54,7 +54,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v4_"; // bumped: now also caches each player's own last-season average
+  const DVP_CACHE_PREFIX = "ffl_dvp_v5_"; // bumped: DEF now uses custom league-scoring calc, not Sleeper's generic preset
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -277,6 +277,47 @@
     return typeof v === "number" ? v : null;
   }
 
+  // Points-allowed brackets in ascending order — the dominant swing factor in
+  // most leagues' defense scoring (often a 10+ point spread shutout-to-blowout),
+  // and the piece most likely to diverge from Sleeper's generic preset since
+  // every league sets its own bracket values.
+  const PTS_ALLOW_BRACKETS = [
+    { max: 0, key: "pts_allow_0" },
+    { max: 6, key: "pts_allow_1_6" },
+    { max: 13, key: "pts_allow_7_13" },
+    { max: 20, key: "pts_allow_14_20" },
+    { max: 27, key: "pts_allow_21_27" },
+    { max: 34, key: "pts_allow_28_34" },
+    { max: Infinity, key: "pts_allow_35p" },
+  ];
+  // Computes a defense's fantasy points from raw box-score stats using THIS
+  // league's actual configured scoring values, instead of trusting Sleeper's
+  // generic pts_ppr/pts_std default (which uses its own bracket values, not
+  // this league's custom ones). Best-effort: only applies what it can actually
+  // match, and reports whether it found real data to work with.
+  function customDefensePoints(statLine, scoringSettings) {
+    if (!statLine || !scoringSettings) return { points: null, matched: false };
+    let total = 0;
+    let matched = false;
+
+    if (typeof statLine.pts_allow === "number") {
+      const bracket = PTS_ALLOW_BRACKETS.find((b) => statLine.pts_allow <= b.max);
+      if (bracket && typeof scoringSettings[bracket.key] === "number") {
+        total += scoringSettings[bracket.key];
+        matched = true;
+      }
+    }
+    const simpleStats = { sack: "sack", int: "int", fum_rec: "fum_rec", ff: "ff", safe: "safe", blk_kick: "blk_kick", def_td: "def_td" };
+    for (const statKey in simpleStats) {
+      const settingKey = simpleStats[statKey];
+      if (typeof statLine[statKey] === "number" && typeof scoringSettings[settingKey] === "number") {
+        total += statLine[statKey] * scoringSettings[settingKey];
+        matched = true;
+      }
+    }
+    return { points: matched ? total : null, matched };
+  }
+
   // Real box-score stats for every NFL player in a given week (not just this league's rosters).
   async function fetchWeekStats(season, week) {
     try {
@@ -302,6 +343,7 @@
   // Built entirely from real results — no rankings or opinions borrowed from anyone.
   async function computeDVPForRange(season, weeks) {
     const field = scoringField();
+    const scoringSettings = (DATA.league && DATA.league.scoring_settings) || {};
     const table = {}; // opponent team -> position -> { sum, n }
     const perPlayer = {}; // player_id -> { sum, n } — this specific player's own average that season
     const weekResults = await Promise.all(
@@ -311,6 +353,8 @@
     let statLinesSeen = 0;
     let statLinesUsable = 0; // had a matching scoring field
     let observations = 0; // actually attributed into the table (also needs a schedule match)
+    let defCustomMatched = 0;
+    let defCustomTotal = 0;
     for (const [stats, schedule] of weekResults) {
       if (!stats || !schedule) continue;
       weeksWithData++;
@@ -318,7 +362,15 @@
         const p = DATA.players[pid];
         if (!p || !p.t || !DVP_POSITIONS.includes(p.p)) continue;
         statLinesSeen++;
-        const pts = pointsFromStatLine(stats[pid], field);
+        let pts;
+        if (p.p === "DEF") {
+          defCustomTotal++;
+          const custom = customDefensePoints(stats[pid], scoringSettings);
+          if (custom.matched) defCustomMatched++;
+          pts = custom.points !== null ? custom.points : pointsFromStatLine(stats[pid], field);
+        } else {
+          pts = pointsFromStatLine(stats[pid], field);
+        }
         if (pts === null) continue;
         statLinesUsable++;
         if (!perPlayer[pid]) perPlayer[pid] = { sum: 0, n: 0 };
@@ -342,7 +394,7 @@
     return {
       avg,
       perPlayer,
-      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field },
+      diagnostics: { weeksAttempted: weeks.length, weeksWithData, statLinesSeen, statLinesUsable, observations, field, defCustomMatched, defCustomTotal },
     };
   }
 
@@ -366,15 +418,20 @@
     } catch (e) { /* corrupt cache, recompute */ }
 
     try {
-      let result, source;
+      let result, sourceLabel;
       if (usePrevious) {
         const prevSeason = String(Number(season) - 1);
         result = await computeDVPForRange(prevSeason, Array.from({ length: 18 }, (_, i) => i + 1));
-        source = `${prevSeason} season (no completed ${season} weeks yet) — ${result.diagnostics.weeksWithData}/${result.diagnostics.weeksAttempted} weeks of data, ${result.diagnostics.observations} player-games, field "${result.diagnostics.field}"`;
+        sourceLabel = `${prevSeason} season (no completed ${season} weeks yet)`;
       } else {
         result = await computeDVPForRange(season, Array.from({ length: week - 1 }, (_, i) => i + 1));
-        source = `${season}, weeks 1–${week - 1} — ${result.diagnostics.weeksWithData}/${result.diagnostics.weeksAttempted} weeks of data, ${result.diagnostics.observations} player-games, field "${result.diagnostics.field}"`;
+        sourceLabel = `${season}, weeks 1–${week - 1}`;
       }
+      const d = result.diagnostics;
+      const defNote = d.defCustomTotal
+        ? `, DEF custom-scoring matched ${d.defCustomMatched}/${d.defCustomTotal}`
+        : "";
+      const source = `${sourceLabel} — ${d.weeksWithData}/${d.weeksAttempted} weeks of data, ${d.observations} player-games, field "${d.field}"${defNote}`;
       const table = result.avg;
       if (!Object.keys(table).length) throw new Error("empty DVP table");
       DATA.dvp = table;
