@@ -329,7 +329,16 @@ main { flex: 1; padding: 10px 16px 24px; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; }
 .modal-header h2 { font-size: 17px; margin: 0; }
 
-.matchup-detail-modal { max-height: 85vh; overflow-y: auto; }
+.matchup-detail-modal {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
 .matchup-detail-header-row { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 4px; gap: 10px; }
 .matchup-detail-team-heading { font-size: 13px; font-weight: 700; }
 .matchup-detail-team-heading.right { text-align: right; }
@@ -362,7 +371,7 @@ main { flex: 1; padding: 10px 16px 24px; }
 .slot-side-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .slot-side-meta { font-size: 10px; color: var(--text-dim); }
 .slot-side-pts { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.slot-side-proj { font-size: 10px; font-weight: 500; color: var(--text-dim); margin-left: 5px; }
+.slot-side-proj { font-size: 11px; font-weight: 700; color: var(--d); margin-left: 5px; }
 .slot-side.right .slot-side-proj { margin-left: 0; margin-right: 5px; }
 
 .matchup-detail-bench-heading {
