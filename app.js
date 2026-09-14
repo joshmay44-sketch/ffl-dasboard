@@ -208,6 +208,23 @@
       .reduce((sum, pid) => sum + (projectPoints(pid) || 0), 0);
   }
 
+  // Live-adjusted total for the CURRENT week's matchups/win%: once a player has
+  // actually recorded a nonzero score this week, use that real number instead of
+  // the pre-game projection — mirrors what Sleeper's own in-app projection does,
+  // converging to the true final score as games finish instead of staying frozen
+  // at a pre-game snapshot all day. A 0 in Sleeper's live feed is ambiguous
+  // (genuinely scored zero vs. hasn't played yet) — treated as "hasn't played"
+  // here, since that's the far more common case and the safer assumption.
+  function teamLiveAdjustedTotal(roster) {
+    const matchup = matchupFor(roster.roster_id);
+    return (roster.starters || []).reduce((sum, pid, idx) => {
+      if (!pid || pid === "0") return sum;
+      const live = ptsFor(matchup, pid, idx);
+      const val = live ? live : projectPoints(pid) || 0;
+      return sum + val;
+    }, 0);
+  }
+
   function flexEligibility(slotLabel) {
     const s = (slotLabel || "").toUpperCase();
     if (s.includes("SUPER_FLEX") || s === "SUPERFLEX") return ["QB", "RB", "WR", "TE"];
@@ -556,8 +573,8 @@
         const [a, b] = group;
         const rosterA = DATA.rosters.find((r) => r.roster_id === a.roster_id);
         const rosterB = DATA.rosters.find((r) => r.roster_id === b.roster_id);
-        const projA = rosterA ? teamProjectedTotal(rosterA) : null;
-        const projB = rosterB ? teamProjectedTotal(rosterB) : null;
+        const projA = rosterA ? teamLiveAdjustedTotal(rosterA) : null;
+        const projB = rosterB ? teamLiveAdjustedTotal(rosterB) : null;
         const probA = projA !== null && projB !== null ? winProbability(projA, projB) : null;
 
         const rows = [a, b].map((m) => {
