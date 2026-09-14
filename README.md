@@ -10,7 +10,10 @@ Six tabs, each its own screen (no more everything stacked on one page):
   computed by converting the projected point gap into a probability using the
   normal distribution and your league's own real week-to-week scoring volatility
   (falls back to a labeled typical-volatility default only before enough weeks
-  exist to measure it). Capped to 1–99%; it never claims certainty.
+  exist to measure it). Capped to 1–99%; it never claims certainty. Each side
+  also shows how many starters (and at which positions) haven't recorded a live
+  score yet this week, so it's clear how much of the matchup is still in motion
+  versus already locked in.
 - **Power Rankings** — every team ranked by total projected starter points (same
   engine as Start/Sit), independent of actual win-loss record — a strength ranking,
   not the standings.
@@ -37,7 +40,12 @@ Six tabs, each its own screen (no more everything stacked on one page):
   discount (15%/50%) to their own number rather than an automatic bench swap —
   so a still-elite Questionable starter isn't reflexively pulled for a much
   weaker healthy option — while Out/IR/Suspended/PUP zeroes the projection
-  outright, since Sleeper itself expects zero snaps.
+  outright, since Sleeper itself expects zero snaps. Any range of real games
+  (a full last season, a DVP window) is recency-weighted rather than a flat
+  average — the most recent week in range counts fully and each week further
+  back counts a little less (roughly a 9-10 week half-life) — so a player's
+  current role carries more weight than what they did at the start of a season
+  that may have looked very different.
 - **Waivers** — Sleeper's trending adds (last 24h), filtered to players not already
   on any roster in your league. A player is surfaced if they fill a thin roster
   spot **or** project (via the same engine above) to outscore your current

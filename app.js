@@ -63,7 +63,7 @@
   const MATCHUP_DIFF_CACHE_PREFIX = "ffl_matchupdiff_v1_";
   const TRADE_VALUES_CACHE_KEY = "ffl_trade_values_v1";
   const TRADE_VALUES_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-  const DVP_CACHE_PREFIX = "ffl_dvp_v6_"; // bumped: ALL positions now use custom league-scoring calc, not Sleeper's generic preset
+  const DVP_CACHE_PREFIX = "ffl_dvp_v7_"; // bumped: personal/DVP averages are now recency-weighted, not a flat season average
   const DVP_MAX_AGE_MS = 20 * 60 * 60 * 1000; // recompute roughly once a day
   const DVP_POSITIONS = ["QB", "RB", "WR", "TE", "DEF", "K"];
   // Streaming-relevant positions: for these, Sleeper's precomputed point fields
@@ -72,6 +72,12 @@
   // than the skill-position numbers above.
   const STREAM_POSITIONS = ["DEF", "K"];
   const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
+  // Per-week decay applied when averaging a range of real games (see
+  // computeDVPForRange): 0.93 gives roughly a 9-10 week half-life, so a full
+  // last-season average still leans noticeably toward the second half of that
+  // season — closer to a player's current role/opportunity than the season
+  // open — without discarding the earlier weeks entirely.
+  const RECENCY_DECAY = 0.93;
 
   const el = (id) => document.getElementById(id);
   const escapeHtml = (s) =>
@@ -234,6 +240,24 @@
     }, 0);
   }
 
+  // Starters who haven't recorded a live score yet this week — same "0 means
+  // hasn't played" convention as teamLiveAdjustedTotal above, kept consistent
+  // so the count always matches what's actually driving the live total.
+  function yetToPlayInfo(roster) {
+    const matchup = matchupFor(roster.roster_id);
+    let count = 0;
+    const positions = [];
+    (roster.starters || []).forEach((pid, idx) => {
+      if (!pid || pid === "0") return;
+      if (ptsFor(matchup, pid, idx)) return;
+      count++;
+      const p = DATA.players[pid];
+      const pos = p && p.p ? p.p : "?";
+      if (!positions.includes(pos)) positions.push(pos);
+    });
+    return { count, positions };
+  }
+
   function flexEligibility(slotLabel) {
     const s = (slotLabel || "").toUpperCase();
     if (s.includes("SUPER_FLEX") || s === "SUPERFLEX") return ["QB", "RB", "WR", "TE"];
@@ -384,9 +408,18 @@
     let defCustomTotal = 0;
     let offCustomMatched = 0;
     let offCustomTotal = 0;
-    for (const [stats, schedule] of weekResults) {
+    for (let i = 0; i < weekResults.length; i++) {
+      const [stats, schedule] = weekResults[i];
       if (!stats || !schedule) continue;
       weeksWithData++;
+      // Recency weight: the most recent week in this range counts fully, each
+      // week further back counts a little less — real per-week results, just
+      // biased toward a player's current role rather than diluted evenly across
+      // a whole season that may include a since-changed team/role/depth-chart
+      // spot. Rolled into perPlayer/table via the {sum,n} contract itself (n
+      // accumulates weight, not a literal count), so avgPts()'s sum/n stays a
+      // correct weighted average with no changes needed there.
+      const weight = Math.pow(RECENCY_DECAY, weeks.length - 1 - i);
       for (const pid in stats) {
         const p = DATA.players[pid];
         if (!p || !p.t || !DVP_POSITIONS.includes(p.p)) continue;
@@ -406,15 +439,15 @@
         if (pts === null) continue;
         statLinesUsable++;
         if (!perPlayer[pid]) perPlayer[pid] = { sum: 0, n: 0 };
-        perPlayer[pid].sum += pts;
-        perPlayer[pid].n += 1;
+        perPlayer[pid].sum += pts * weight;
+        perPlayer[pid].n += weight;
         const oppInfo = schedule[p.t];
         if (!oppInfo) continue;
         const opp = oppInfo.opponent;
         if (!table[opp]) table[opp] = {};
         if (!table[opp][p.p]) table[opp][p.p] = { sum: 0, n: 0 };
-        table[opp][p.p].sum += pts;
-        table[opp][p.p].n += 1;
+        table[opp][p.p].sum += pts * weight;
+        table[opp][p.p].n += weight;
         observations++;
       }
     }
@@ -691,6 +724,11 @@
     el("matchup-detail-name-b").textContent = rosterB ? teamNameFor(rosterB.owner_id) : "Team";
     el("matchup-detail-total-a").textContent = `Total: ${fmtPts(rosterA ? teamLiveAdjustedTotal(rosterA) : 0)}`;
     el("matchup-detail-total-b").textContent = `Total: ${fmtPts(rosterB ? teamLiveAdjustedTotal(rosterB) : 0)}`;
+    const ytsA = rosterA ? yetToPlayInfo(rosterA) : { count: 0, positions: [] };
+    const ytsB = rosterB ? yetToPlayInfo(rosterB) : { count: 0, positions: [] };
+    el("matchup-detail-yts-a").textContent = ytsA.count ? `Yet to play (${ytsA.count}): ${ytsA.positions.join(", ")}` : "";
+    el("matchup-detail-yts-b").textContent = ytsB.count ? `Yet to play (${ytsB.count}): ${ytsB.positions.join(", ")}` : "";
+    el("matchup-detail-yts-row").hidden = !ytsA.count && !ytsB.count;
     el("matchup-detail-rows").innerHTML =
       slotOrder
         .map((slot, idx) => matchupSlotRowHtml(startersA[idx], startersB[idx], slot, a, b, idx))
@@ -786,11 +824,12 @@
           const filledSlots = roster ? (roster.starters || []).filter((pid) => pid && pid !== "0").length : null;
           const totalSlots = roster ? (roster.starters || []).length : null;
           const incomplete = filledSlots !== null && totalSlots !== null && filledSlots < totalSlots;
+          const yts = roster ? yetToPlayInfo(roster) : { count: 0, positions: [] };
           return `<div class="matchup-row">
             ${av ? `<img class="matchup-avatar" alt="" src="${av}" />` : `<div class="matchup-avatar"></div>`}
             <div class="matchup-team">
               <div class="matchup-team-name">${escapeHtml(name)}${isMe ? " (You)" : ""}</div>
-              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}${proj !== null ? ` · proj ${fmtPts(proj)}` : ""}${prob !== null ? ` · ${Math.round(prob * 100)}% to win` : ""}${incomplete ? ` · ${escapeHtml(`${filledSlots}/${totalSlots} slots filled`)}` : ""}</div>
+              <div class="matchup-team-meta">${roster ? `${roster.settings.wins}-${roster.settings.losses}${roster.settings.ties ? "-" + roster.settings.ties : ""}` : ""}${proj !== null ? ` · proj ${fmtPts(proj)}` : ""}${prob !== null ? ` · ${Math.round(prob * 100)}% to win` : ""}${incomplete ? ` · ${escapeHtml(`${filledSlots}/${totalSlots} slots filled`)}` : ""}${yts.count ? ` · yet to play (${yts.count}): ${escapeHtml(yts.positions.join(", "))}` : ""}</div>
             </div>
             <div class="matchup-score${winning ? " winning" : ""}">${(m.points || 0).toFixed(2)}</div>
           </div>`;

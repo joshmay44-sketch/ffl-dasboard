@@ -339,10 +339,12 @@ main { flex: 1; padding: 10px 16px 24px; }
   padding: calc(14px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
-.matchup-detail-header-row { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 4px; gap: 10px; }
+.matchup-detail-header-row:not([hidden]) { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 4px; gap: 10px; }
 .matchup-detail-team-heading { font-size: 13px; font-weight: 700; }
 .matchup-detail-team-heading.right { text-align: right; }
 .matchup-detail-total { font-size: 13px; font-weight: 700; }
+.matchup-detail-yts { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.matchup-detail-yts.right { text-align: right; }
 .matchup-detail-rows { display: flex; flex-direction: column; gap: 8px; }
 .matchup-slot-row {
   display: flex;

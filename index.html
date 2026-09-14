@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0e1a" />
   <title>Fantasy Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏈</text></svg>" />
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
   <div id="app">
@@ -42,7 +42,7 @@
 
     <main>
       <section id="view-matchups" class="view">
-        <p class="section-note">"Proj" updates live: once a player has actually scored this week, their real points replace the pre-game estimate, converging to the true final total as games finish — not a number frozen at kickoff. Win % converts the gap into a probability using the normal distribution and your league's real week-to-week scoring volatility.</p>
+        <p class="section-note">"Proj" updates live: once a player has actually scored this week, their real points replace the pre-game estimate, converging to the true final total as games finish — not a number frozen at kickoff. Win % converts the gap into a probability using the normal distribution and your league's real week-to-week scoring volatility. "Yet to play" shows how many starters (and at which positions) haven't recorded a live score yet — how much of the matchup is still actually in motion.</p>
         <div id="stddev-status" class="waiver-note" hidden></div>
         <div id="matchups-list" class="stack"></div>
       </section>
@@ -143,6 +143,10 @@
       <div class="matchup-detail-team-heading" id="matchup-detail-name-a"></div>
       <div class="matchup-detail-team-heading right" id="matchup-detail-name-b"></div>
     </div>
+    <div class="matchup-detail-header-row" id="matchup-detail-yts-row" hidden>
+      <div class="matchup-detail-yts" id="matchup-detail-yts-a"></div>
+      <div class="matchup-detail-yts right" id="matchup-detail-yts-b"></div>
+    </div>
     <div id="matchup-detail-rows" class="matchup-detail-rows"></div>
     <div class="matchup-detail-header-row">
       <div class="matchup-detail-total" id="matchup-detail-total-a"></div>
@@ -155,6 +159,6 @@
     </div>
   </dialog>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
