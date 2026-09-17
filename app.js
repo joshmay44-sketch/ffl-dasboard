@@ -71,6 +71,11 @@
   // trade value or get traded in practice, and FantasyCalc itself barely
   // prices them.
   const TRADE_POSITIONS = ["QB", "RB", "WR", "TE"];
+  // Hard ceiling on how lopsided a suggested 1-for-1 can be, independent of
+  // how the trade candidates were selected — a backstop against any single
+  // bad value/projection misfiring into a suggestion nobody would ever
+  // realistically accept.
+  const TRADE_MAX_VALUE_RATIO = 2;
   const PROJECTION_BLEND = 0.6; // weight on a player's own recent scoring vs. opponent DVP baseline
   // Per-week decay applied when averaging a range of real games (see
   // computeDVPForRange): 0.93 gives roughly a 9-10 week half-life, so a full
@@ -1194,18 +1199,26 @@
   // big surplus at one position, so gating trade candidates on that almost
   // never fires. Any bench player beyond what the position actually starts
   // is a realistic trade chip, full stop.
+  // Ranked by real market value (FantasyCalc), not our own weekly
+  // projection — a projection is exactly the kind of noisy, early-season-
+  // unreliable number that could misfire on any player for a dozen reasons
+  // (a data gap, a bye, a thin sample), and ranking "who's a team's real
+  // starter-tier asset" on that is how a bug once suggested offering up a
+  // team's clear WR1 as throw-in bench depth. Market value is a much more
+  // stable signal for "would this team actually consider moving this player."
   function tradeableCandidates(roster) {
     const required = requiredStartCounts();
     const byPos = {};
     (roster.players || []).forEach((pid) => {
       const p = DATA.players[pid];
       if (!p || !TRADE_POSITIONS.includes(p.p)) return;
-      (byPos[p.p] = byPos[p.p] || []).push({ pid, proj: projectPoints(pid) ?? -Infinity });
+      const value = (DATA.tradeValues[pid] && DATA.tradeValues[pid].value) ?? -Infinity;
+      (byPos[p.p] = byPos[p.p] || []).push({ pid, value });
     });
     const tradeable = new Set();
     Object.keys(byPos).forEach((pos) => {
       byPos[pos]
-        .sort((a, b) => b.proj - a.proj)
+        .sort((a, b) => b.value - a.value)
         .slice(required[pos] || 0)
         .forEach((x) => tradeable.add(x.pid));
     });
@@ -1366,6 +1379,14 @@
           const getValue = valueOf(getPid);
           const edge = getValue - giveValue;
           if (edge <= 0) return;
+          // A sanity cap independent of how the candidates got here at all —
+          // even a correct classification could occasionally pair a modest
+          // throw-in against something far more valuable if the value data
+          // is off for one player. No real manager considers a straight
+          // 1-for-1 where one side is worth several times the other, so a
+          // suggestion that lopsided is a red flag regardless of source,
+          // not a great deal to chase.
+          if (getValue > giveValue * TRADE_MAX_VALUE_RATIO) return;
           const projGet = projectPoints(getPid);
           const projEdge = projGive !== null && projGet !== null ? projGet - projGive : null;
           const projEdgePct = projEdge !== null && projGive > 0 ? projEdge / projGive : 0;
