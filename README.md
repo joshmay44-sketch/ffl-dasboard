@@ -72,12 +72,14 @@ Six tabs, each its own screen (no more everything stacked on one page):
   market value, pulled from **FantasyCalc** (a community trade-value tool keyed
   directly off Sleeper player IDs) — a genuinely different data source than Sleeper.
   Above the manual builder, **Suggested Trades** scans every other roster for a
-  real 1-for-1 opportunity: give from a position where you have genuine bench
-  surplus (at least 2 more players than your league's own starting requirement
-  needs), receive at a position you're actually thin at, and only surface it
-  when the FantasyCalc value math nets out in your favor — this tool exists to
-  find offers worth sending, not to do neutral analysis, so an even or
-  losing trade never appears. Every candidate is also compared on
+  real 1-for-1 opportunity: give one of your bench-tier players — anyone
+  outside your own starter count at that position, not gated behind an
+  arbitrary "2+ extra" threshold, since real rosters rarely stockpile that
+  much depth at one spot — and receive one of theirs that would actually beat
+  your current weakest starter there, only surfaced when the FantasyCalc
+  value math also nets out in your favor. This tool exists to find offers
+  worth sending, not to do neutral analysis, so an even or losing trade never
+  appears. Every candidate is also compared on
   rest-of-season projection (the same model used everywhere else), not just
   market value — a suggestion notes when the projection backs up the trade
   value too versus when it's mostly a value/buy-low play with the numbers

@@ -1187,15 +1187,29 @@
     const required = requiredStartCounts();
     return Object.keys(required).filter((pos) => (counts[pos] || 0) <= required[pos]);
   }
-  // Positions where a roster carries meaningfully more depth than its own
-  // starting requirement — at least 2 more than needed, real bench surplus
-  // rather than a normal 1-deep bench. These are the players realistically
-  // available to trade away without weakening the starting lineup.
-  const TRADE_SURPLUS_MARGIN = 2;
-  function computeSurplusPositions(roster) {
-    const counts = positionCounts(roster);
+  // Every player on a roster who isn't one of that roster's own starter-tier
+  // players at their position — i.e. real bench depth, ranked out by that
+  // team's own projections. This intentionally has no arbitrary "2+ extra"
+  // threshold: on a normal-sized fantasy roster, a team rarely stockpiles a
+  // big surplus at one position, so gating trade candidates on that almost
+  // never fires. Any bench player beyond what the position actually starts
+  // is a realistic trade chip, full stop.
+  function tradeableCandidates(roster) {
     const required = requiredStartCounts();
-    return Object.keys(counts).filter((pos) => (counts[pos] || 0) >= (required[pos] || 0) + TRADE_SURPLUS_MARGIN);
+    const byPos = {};
+    (roster.players || []).forEach((pid) => {
+      const p = DATA.players[pid];
+      if (!p || !TRADE_POSITIONS.includes(p.p)) return;
+      (byPos[p.p] = byPos[p.p] || []).push({ pid, proj: projectPoints(pid) ?? -Infinity });
+    });
+    const tradeable = new Set();
+    Object.keys(byPos).forEach((pos) => {
+      byPos[pos]
+        .sort((a, b) => b.proj - a.proj)
+        .slice(required[pos] || 0)
+        .forEach((x) => tradeable.add(x.pid));
+    });
+    return tradeable;
   }
 
   // Your single weakest rostered player at each position, by projection — the
@@ -1295,12 +1309,13 @@
     });
   }
 
-  // Scans every other team for a 1-for-1 swap where you give from a position
-  // where you have real bench surplus and receive at a position you're thin
-  // at — kept only when the two players' FantasyCalc values net out in your
-  // favor. Deliberately one-sided: this tool exists to find offers worth
-  // actually sending, not to do neutral analysis, so a trade that's even or
-  // favors the other team never shows up here.
+  // Scans every other team for a 1-for-1 swap where you give a bench-tier
+  // player of yours and receive a bench-tier player of theirs that would
+  // actually be a real upgrade over your current weakest starter at that
+  // position — kept only when the two players' FantasyCalc values also net
+  // out in your favor. Deliberately one-sided: this tool exists to find
+  // offers worth actually sending, not to do neutral analysis, so a trade
+  // that's even or favors the other team never shows up here.
   //
   // Market value alone doesn't say who actually helps you score more points
   // the rest of this season, so every candidate also gets the same
@@ -1313,31 +1328,32 @@
     const myRoster = DATA.myUserId ? rosterForUser(DATA.myUserId) : null;
     if (!myRoster) return [];
 
-    const myNeeds = computeThinPositions(myRoster);
-    const mySurplus = computeSurplusPositions(myRoster);
     const valueOf = (pid) => (DATA.tradeValues[pid] && DATA.tradeValues[pid].value) || null;
-
-    const giveCandidates = (myRoster.players || []).filter((pid) => {
-      const p = DATA.players[pid];
-      return p && TRADE_POSITIONS.includes(p.p) && mySurplus.includes(p.p) && valueOf(pid) !== null;
-    });
+    const myFloor = rosterFloorByPosition(myRoster);
+    const giveCandidates = [...tradeableCandidates(myRoster)].filter((pid) => valueOf(pid) !== null);
     if (!giveCandidates.length) return [];
 
     const suggestions = [];
     DATA.rosters.forEach((roster) => {
       if (roster.roster_id === myRoster.roster_id) return;
-      const theirNeeds = computeThinPositions(roster);
-      const theirSurplus = computeSurplusPositions(roster);
       const teamName = teamNameFor(roster.owner_id);
       const wins = roster.settings.wins || 0;
       const losses = roster.settings.losses || 0;
       const ties = roster.settings.ties || 0;
       const oppRecord = `${wins}-${losses}${ties ? `-${ties}` : ""}`;
       const oppLosingRecord = losses > wins;
+      const theirFloor = rosterFloorByPosition(roster);
 
-      const getCandidates = (roster.players || []).filter((pid) => {
+      // Their bench-tier players that would actually beat your current floor
+      // at that position by a real margin — a genuine upgrade for you, not
+      // just anyone they happen to have depth at. This also naturally keeps
+      // the ask realistic: it's restricted to players THEY consider bench
+      // depth, never their clear starter-tier assets.
+      const getCandidates = [...tradeableCandidates(roster)].filter((pid) => {
         const p = DATA.players[pid];
-        return p && TRADE_POSITIONS.includes(p.p) && myNeeds.includes(p.p) && theirSurplus.includes(p.p) && valueOf(pid) !== null;
+        const proj = projectPoints(pid);
+        const f = myFloor[p.p];
+        return valueOf(pid) !== null && proj !== null && f && proj > f.proj + WAIVER_UPGRADE_MARGIN;
       });
       if (!getCandidates.length) return;
 
@@ -1353,6 +1369,11 @@
           const projGet = projectPoints(getPid);
           const projEdge = projGive !== null && projGet !== null ? projGet - projGive : null;
           const projEdgePct = projEdge !== null && projGive > 0 ? projEdge / projGive : 0;
+          // Would giving THEM this player be a real upgrade for their own
+          // weakest starter at that position? That's a much more meaningful
+          // "would they actually want this" signal than a coarse need count.
+          const theirFloorEntry = theirFloor[giveInfo.p];
+          const mutualFit = !!(theirFloorEntry && projGive !== null && projGive > theirFloorEntry.proj + WAIVER_UPGRADE_MARGIN);
           suggestions.push({
             rosterId: roster.roster_id,
             teamName, oppRecord, oppLosingRecord,
@@ -1361,7 +1382,7 @@
             edge,
             edgePct: edge / giveValue,
             projEdgePct,
-            mutualFit: theirNeeds.includes(giveInfo.p),
+            mutualFit,
           });
         });
       });
